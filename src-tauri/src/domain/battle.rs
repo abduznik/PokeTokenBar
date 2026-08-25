@@ -98,7 +98,11 @@ pub struct ActiveBattleState {
     #[serde(alias = "reward_coins")]
     pub reward_coins: u64,
     pub won: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none", alias = "gym_leader_id")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "gym_leader_id"
+    )]
     pub gym_leader_id: Option<String>,
 }
 
@@ -293,11 +297,11 @@ pub fn resolve_species_types(species_id: i64) -> Vec<String> {
         95 => vec!["Rock".to_string(), "Ground".to_string()],         // Onix
         120 | 121 => vec!["Water".to_string(), "Psychic".to_string()], // Staryu / Starmie
         43 | 44 | 45 => vec!["Grass".to_string(), "Poison".to_string()], // Oddish / Gloom / Vileplume
-        109 | 110 => vec!["Poison".to_string()],                       // Koffing / Weezing
-        111 | 112 => vec!["Ground".to_string(), "Rock".to_string()],   // Rhyhorn / Rhydon
-        144 => vec!["Ice".to_string(), "Flying".to_string()],         // Articuno
-        145 => vec!["Electric".to_string(), "Flying".to_string()],    // Zapdos
-        146 => vec!["Fire".to_string(), "Flying".to_string()],        // Moltres
+        109 | 110 => vec!["Poison".to_string()],                         // Koffing / Weezing
+        111 | 112 => vec!["Ground".to_string(), "Rock".to_string()],     // Rhyhorn / Rhydon
+        144 => vec!["Ice".to_string(), "Flying".to_string()],            // Articuno
+        145 => vec!["Electric".to_string(), "Flying".to_string()],       // Zapdos
+        146 => vec!["Fire".to_string(), "Flying".to_string()],           // Moltres
         _ => vec!["Normal".to_string()],
     }
 }
@@ -985,7 +989,9 @@ pub fn get_gym_leaders() -> Vec<GymLeaderDef> {
 }
 
 pub fn find_gym_leader(leader_id: &str) -> Option<GymLeaderDef> {
-    get_gym_leaders().into_iter().find(|g| g.id.eq_ignore_ascii_case(leader_id))
+    get_gym_leaders()
+        .into_iter()
+        .find(|g| g.id.eq_ignore_ascii_case(leader_id))
 }
 
 pub fn build_gym_leader_fighter(leader: &GymLeaderDef) -> BattleFighter {

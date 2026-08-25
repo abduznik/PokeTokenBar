@@ -3,9 +3,19 @@
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { isEnabled, enable, disable } from "@tauri-apps/plugin-autostart";
+  import { openUrl } from "@tauri-apps/plugin-opener";
   import { onMount } from "svelte";
   import { resolveOverdrive } from "$lib/mega";
   import { ALL_RIBBONS, ORDERED_RIBBON_IDS, getRibbon } from "$lib/ribbons";
+
+  interface UpdateInfo {
+    currentVersion: string;
+    latestVersion: string;
+    releaseName: string;
+    releaseUrl: string;
+    releaseNotes: string;
+    publishedAt: string;
+  }
 
   interface ShopEntry {
     kind: string;
@@ -373,6 +383,49 @@
     } catch (e: any) {
       arenaNotice = typeof e === "string" ? e : "Not enough Battle Points!";
       setTimeout(() => { arenaNotice = null; }, 3000);
+    }
+  }
+
+  // 🚀 App Update Checker State & Actions
+  let updateInfo = $state<UpdateInfo | null>(null);
+  let updateBannerDismissed = $state(false);
+  let showUpdateNotesModal = $state(false);
+  let isCheckingUpdate = $state(false);
+  let updateCheckFeedback = $state<string | null>(null);
+
+  async function checkForAppUpdates(manual = false) {
+    if (manual) {
+      isCheckingUpdate = true;
+      updateCheckFeedback = null;
+    }
+    try {
+      const info = await invoke<UpdateInfo | null>("check_for_updates");
+      if (info) {
+        updateInfo = info;
+        if (manual) {
+          updateCheckFeedback = `✨ New version v${info.latestVersion} available!`;
+        }
+      } else if (manual) {
+        updateCheckFeedback = "PokeTokenBar is up to date! 🎉";
+        setTimeout(() => { updateCheckFeedback = null; }, 3500);
+      }
+    } catch (e) {
+      console.warn("Update check failed (offline or rate-limited):", e);
+      if (manual) {
+        updateCheckFeedback = "Could not check update server";
+        setTimeout(() => { updateCheckFeedback = null; }, 3500);
+      }
+    } finally {
+      if (manual) isCheckingUpdate = false;
+    }
+  }
+
+  async function openExternalUrl(url: string) {
+    try {
+      await openUrl(url);
+    } catch (e) {
+      console.error("Failed to open url:", e);
+      window.open(url, "_blank");
     }
   }
 
@@ -813,6 +866,11 @@
     refresh();
     checkAutostart();
 
+    // Check for new releases in background
+    setTimeout(() => {
+      checkForAppUpdates(false);
+    }, 1500);
+
     const interval = setInterval(() => {
       refresh();
     }, refreshIntervalSec * 1000);
@@ -1133,6 +1191,29 @@
       </div>
     </header>
 
+    <!-- 🚀 Floating In-App Update Notification Banner -->
+    {#if updateInfo && !updateBannerDismissed}
+      <div class="app-update-banner">
+        <div class="aub-left">
+          <span class="aub-icon">🚀</span>
+          <span class="aub-text">
+            <strong>Update available!</strong> v{updateInfo.latestVersion} is out
+          </span>
+        </div>
+        <div class="aub-actions">
+          <button type="button" class="aub-btn aub-btn-notes" onclick={() => showUpdateNotesModal = true}>
+            What's New
+          </button>
+          <button type="button" class="aub-btn aub-btn-download" onclick={() => openExternalUrl(updateInfo?.releaseUrl || "https://github.com/aschwehm/PokeTokenBar/releases/latest")}>
+            Download ➔
+          </button>
+          <button type="button" class="aub-btn-close" onclick={() => updateBannerDismissed = true} title="Dismiss for now">
+            ✕
+          </button>
+        </div>
+      </div>
+    {/if}
+
     <div class="nav-bar" role="tablist">
       {#each navTabs as tab (tab.id)}
         <button
@@ -1285,9 +1366,36 @@
           <div class="about-box">
             <div class="about-header">
               <span>PokéTokenBar</span>
-              <span class="version-tag">v0.4.0</span>
+              <span class="version-tag">v{updateInfo?.currentVersion || "0.4.0"}</span>
             </div>
             <p class="about-sub">Pokémon companion for AI coding tokens on Windows & Linux.</p>
+
+            <div class="update-check-box">
+              <button
+                type="button"
+                class="check-updates-btn"
+                disabled={isCheckingUpdate}
+                onclick={() => checkForAppUpdates(true)}
+              >
+                {#if isCheckingUpdate}
+                  <span class="spinning">🔄</span> Checking GitHub…
+                {:else}
+                  <span>🚀 Check for Updates</span>
+                {/if}
+              </button>
+              {#if updateCheckFeedback}
+                <span class="update-feedback-msg">{updateCheckFeedback}</span>
+              {/if}
+              {#if updateInfo}
+                <div class="update-available-card">
+                  <div class="uac-title">✨ v{updateInfo.latestVersion} Available!</div>
+                  <div class="uac-actions">
+                    <button type="button" class="uac-btn notes" onclick={() => showUpdateNotesModal = true}>What's New</button>
+                    <button type="button" class="uac-btn download" onclick={() => openExternalUrl(updateInfo?.releaseUrl || "https://github.com/aschwehm/PokeTokenBar/releases/latest")}>Download ➔</button>
+                  </div>
+                </div>
+              {/if}
+            </div>
           </div>
         </div>
 
@@ -2961,6 +3069,47 @@
                 </span>
               </button>
             {/each}
+          </div>
+        </div>
+      </div>
+    {/if}
+
+    <!-- 🚀 Update Release Notes Modal -->
+    {#if showUpdateNotesModal && updateInfo}
+      <div
+        class="modal-backdrop"
+        onclick={() => { showUpdateNotesModal = false; }}
+        role="button"
+        tabindex="0"
+        onkeydown={(e) => e.key === 'Escape' && (showUpdateNotesModal = false)}
+      >
+        <div class="modal-card update-modal-card" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="update-modal-title">
+          <div class="modal-header">
+            <div class="update-modal-title-box">
+              <span class="update-modal-icon">🚀</span>
+              <div>
+                <h3 id="update-modal-title" class="modal-title">{updateInfo.releaseName || `PokeTokenBar v${updateInfo.latestVersion}`}</h3>
+                <p class="modal-subtitle">Published on GitHub • Current: v{updateInfo.currentVersion}</p>
+              </div>
+            </div>
+            <button class="modal-close" onclick={() => { showUpdateNotesModal = false; }}>✕</button>
+          </div>
+
+          <div class="update-notes-body pk-scroll">
+            {#if updateInfo.releaseNotes}
+              <pre class="update-notes-text">{updateInfo.releaseNotes}</pre>
+            {:else}
+              <p class="update-no-notes">A new version of PokeTokenBar is ready to download.</p>
+            {/if}
+          </div>
+
+          <div class="update-modal-footer">
+            <button type="button" class="update-modal-btn cancel" onclick={() => { showUpdateNotesModal = false; }}>
+              Close
+            </button>
+            <button type="button" class="update-modal-btn download" onclick={() => openExternalUrl(updateInfo?.releaseUrl || "https://github.com/aschwehm/PokeTokenBar/releases/latest")}>
+              Download on GitHub ➔
+            </button>
           </div>
         </div>
       </div>
@@ -7027,4 +7176,231 @@
   .log-line.actor-system { color: #FCD34D; font-weight: 700; }
   .log-bullet { opacity: 0.6; flex-shrink: 0; }
   .log-text { word-break: break-word; }
+
+  /* 🚀 Floating In-App Update Banner */
+  .app-update-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.22) 0%, rgba(147, 51, 234, 0.22) 100%);
+    border-bottom: 1px solid rgba(59, 130, 246, 0.35);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    animation: banner-slide-down 0.25s ease;
+  }
+  @keyframes banner-slide-down {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .aub-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .aub-icon {
+    font-size: 15px;
+    filter: drop-shadow(0 0 6px rgba(59, 130, 246, 0.6));
+    animation: icon-bounce 2s infinite ease;
+  }
+  @keyframes icon-bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-2px); }
+  }
+  .aub-text {
+    font-size: 11px;
+    color: #E2E8F0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .aub-text strong {
+    color: #93C5FD;
+  }
+
+  .aub-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .aub-btn {
+    padding: 4px 9px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border: none;
+  }
+  .aub-btn-notes {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #CBD5E1;
+  }
+  .aub-btn-notes:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: #FFF;
+  }
+  .aub-btn-download {
+    background: linear-gradient(135deg, #3B82F6, #6366F1);
+    color: #FFF;
+    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.4);
+  }
+  .aub-btn-download:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.6);
+  }
+  .aub-btn-close {
+    background: transparent;
+    color: #94A3B8;
+    font-size: 12px;
+    padding: 3px 6px;
+  }
+  .aub-btn-close:hover {
+    color: #FFF;
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  /* ⚙️ Preferences Update Box */
+  .update-check-box {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .check-updates-btn {
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #E2E8F0;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: all 0.15s ease;
+  }
+  .check-updates-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+  .update-feedback-msg {
+    font-size: 10.5px;
+    font-weight: 700;
+    color: #93C5FD;
+    text-align: center;
+  }
+  .update-available-card {
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.12), rgba(59, 130, 246, 0.12));
+    border: 1px solid rgba(34, 197, 94, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .uac-title {
+    font-size: 11px;
+    font-weight: 800;
+    color: #4ADE80;
+  }
+  .uac-actions {
+    display: flex;
+    gap: 6px;
+  }
+  .uac-btn {
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 800;
+    cursor: pointer;
+    border: none;
+  }
+  .uac-btn.notes {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #E2E8F0;
+  }
+  .uac-btn.download {
+    background: #22C55E;
+    color: #000;
+    font-weight: 900;
+  }
+
+  /* 🚀 Release Notes Modal */
+  .update-modal-card {
+    max-width: 420px;
+    width: 90%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px;
+  }
+  .update-modal-title-box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .update-modal-icon {
+    font-size: 24px;
+  }
+  .update-notes-body {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 12px;
+    max-height: 280px;
+    overflow-y: auto;
+  }
+  .update-notes-text {
+    margin: 0;
+    font-family: inherit;
+    font-size: 11px;
+    line-height: 1.5;
+    color: #CBD5E1;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .update-no-notes {
+    margin: 0;
+    font-size: 11px;
+    color: #94A3B8;
+  }
+  .update-modal-footer {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+  .update-modal-btn {
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+    border: none;
+    transition: all 0.15s ease;
+  }
+  .update-modal-btn.cancel {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #E2E8F0;
+  }
+  .update-modal-btn.download {
+    background: linear-gradient(135deg, #3B82F6, #6366F1);
+    color: #FFF;
+    box-shadow: 0 2px 10px rgba(59, 130, 246, 0.4);
+  }
+  .update-modal-btn.download:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(59, 130, 246, 0.6);
+  }
 </style>

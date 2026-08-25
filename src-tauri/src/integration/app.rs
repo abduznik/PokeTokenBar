@@ -751,6 +751,29 @@ pub async fn get_pokedex_details(
     .map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+pub async fn check_for_updates(
+    app: tauri::AppHandle,
+) -> Result<Option<crate::integration::updater::UpdateInfo>, String> {
+    let update =
+        tauri::async_runtime::spawn_blocking(crate::integration::updater::check_github_update)
+            .await
+            .map_err(|e| e.to_string())??;
+
+    if let Some(ref info) = update {
+        crate::integration::notify::send_notification(
+            &app,
+            "PokeTokenBar Update Available 🚀",
+            &format!(
+                "Version {} is available! Click to download.",
+                info.latest_version
+            ),
+        );
+    }
+
+    Ok(update)
+}
+
 fn parse_item_kind(s: &str) -> Option<ItemKind> {
     match s {
         "rareCandy" => Some(ItemKind::RareCandy),

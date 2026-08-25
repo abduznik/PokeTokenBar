@@ -12,3 +12,4 @@
 pub mod app;
 pub mod notify;
 pub mod tray;
+pub mod updater;

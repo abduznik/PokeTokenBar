@@ -903,7 +903,8 @@ impl CompanionStore {
         &self,
         species_id: Option<i64>,
     ) -> Result<crate::domain::battle::BattleFighter, String> {
-        let (fighter_id, fighter_name, is_shiny, stage, ribbons) = if let Some(req_id) = species_id {
+        let (fighter_id, fighter_name, is_shiny, stage, ribbons) = if let Some(req_id) = species_id
+        {
             if let Some(active) = self
                 .state
                 .active
@@ -998,14 +999,40 @@ impl CompanionStore {
         let total_tokens = self.state.used_since_install;
 
         match leader_id.to_lowercase().as_str() {
-            "brock" => total_tokens >= 1_000_000 || !self.state.dex.is_empty() || self.state.active.is_some(),
+            "brock" => {
+                total_tokens >= 1_000_000
+                    || !self.state.dex.is_empty()
+                    || self.state.active.is_some()
+            }
             "misty" => has_boulder && (total_tokens >= 10_000_000 || self.state.dex.len() >= 2),
-            "lt_surge" => has_cascade && (self.is_mega_overdrive || total_tokens >= 20_000_000 || self.has_any_ribbon("overdrive")),
-            "erika" => has_thunder && (self.state.journal.iter().any(|j| j.kind == "item" || j.kind == "berry") || total_tokens >= 30_000_000),
+            "lt_surge" => {
+                has_cascade
+                    && (self.is_mega_overdrive
+                        || total_tokens >= 20_000_000
+                        || self.has_any_ribbon("overdrive"))
+            }
+            "erika" => {
+                has_thunder
+                    && (self
+                        .state
+                        .journal
+                        .iter()
+                        .any(|j| j.kind == "item" || j.kind == "berry")
+                        || total_tokens >= 30_000_000)
+            }
             "koga" => has_rainbow && (total_tokens >= 50_000_000 || self.state.dex.len() >= 4),
-            "sabrina" => has_soul && (self.state.battle_stats.best_streak >= 3 || self.state.battle_stats.wins >= 5 || total_tokens >= 75_000_000),
-            "blaine" => has_marsh && (total_tokens >= 100_000_000 || self.unique_ribbons_count() >= 3),
-            "giovanni" => has_volcano && (self.unique_ribbons_count() >= 5 || total_tokens >= 150_000_000),
+            "sabrina" => {
+                has_soul
+                    && (self.state.battle_stats.best_streak >= 3
+                        || self.state.battle_stats.wins >= 5
+                        || total_tokens >= 75_000_000)
+            }
+            "blaine" => {
+                has_marsh && (total_tokens >= 100_000_000 || self.unique_ribbons_count() >= 3)
+            }
+            "giovanni" => {
+                has_volcano && (self.unique_ribbons_count() >= 5 || total_tokens >= 150_000_000)
+            }
             _ => false,
         }
     }
@@ -1016,7 +1043,10 @@ impl CompanionStore {
                 return true;
             }
         }
-        self.state.dex.iter().any(|d| d.ribbons.iter().any(|r| r == ribbon))
+        self.state
+            .dex
+            .iter()
+            .any(|d| d.ribbons.iter().any(|r| r == ribbon))
     }
 
     pub fn unique_ribbons_count(&self) -> usize {
@@ -1076,7 +1106,10 @@ impl CompanionStore {
             .ok_or_else(|| format!("Gym Leader '{}' not found", leader_id))?;
 
         if !self.is_gym_leader_unlocked(&leader.id) {
-            return Err(format!("Gym Leader {} is locked: {}", leader.name, leader.unlock_req));
+            return Err(format!(
+                "Gym Leader {} is locked: {}",
+                leader.name, leader.unlock_req
+            ));
         }
 
         let player = self.build_player_fighter_for_battle(species_id)?;
@@ -1149,7 +1182,10 @@ impl CompanionStore {
                 } else {
                     let bp_rew = 50;
                     let coin_rew = 250 * coin_mult;
-                    let log_msg = format!("Gym Leader defeated! Won +{} BP & +{} Coins!", bp_rew, coin_rew);
+                    let log_msg = format!(
+                        "Gym Leader defeated! Won +{} BP & +{} Coins!",
+                        bp_rew, coin_rew
+                    );
                     (
                         bp_rew,
                         coin_rew,
@@ -5348,7 +5384,11 @@ mod tests {
         assert!(s.state.bp >= 50);
 
         // 5. Verify Badge Journal Entry
-        let badge_entry = s.state.journal.iter().find(|j| j.kind == "battle" && j.title.contains("Boulder Badge"));
+        let badge_entry = s
+            .state
+            .journal
+            .iter()
+            .find(|j| j.kind == "battle" && j.title.contains("Boulder Badge"));
         assert!(badge_entry.is_some());
 
         // 6. Misty Unlock Condition
