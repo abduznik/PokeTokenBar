@@ -60,6 +60,7 @@ pub fn run() {
             integration::app::set_trainer_name,
             integration::app::set_trainer_avatar,
             integration::app::start_battle,
+            integration::app::start_gym_battle,
             integration::app::execute_battle_move,
             integration::app::flee_battle,
             integration::app::clear_battle,

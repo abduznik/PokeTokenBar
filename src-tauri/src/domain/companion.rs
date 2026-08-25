@@ -1082,11 +1082,12 @@ pub struct CompanionState {
     pub avatar_species_id: Option<i64>,
     pub journal: Vec<JournalEntry>,
     pub daily_history: HashMap<String, i64>,
-    // Battle Arena v0.4.0
+    // Battle Arena v0.4.0 & Gym Leaders v0.4.1
     pub bp: u32,
     pub battle_stats: crate::domain::battle::BattleStatsRecord,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_battle: Option<crate::domain::battle::ActiveBattleState>,
+    pub gym_badges: Vec<String>,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -1124,6 +1125,7 @@ impl Default for CompanionState {
             bp: 0,
             battle_stats: crate::domain::battle::BattleStatsRecord::default(),
             active_battle: None,
+            gym_badges: Vec::new(),
         }
     }
 }
@@ -1191,6 +1193,13 @@ impl<'de> Deserialize<'de> for CompanionState {
             Some(item) => crate::domain::battle::ActiveBattleState::deserialize(item).ok(),
             None => None,
         };
+        let gym_badges = match m.get("gymBadges") {
+            Some(Value::Array(arr)) => arr
+                .iter()
+                .filter_map(|item| item.as_str().map(|s| s.to_string()))
+                .collect(),
+            _ => Vec::new(),
+        };
 
         Ok(Self {
             install_baseline_set: get_bool(m, "installBaselineSet"),
@@ -1216,6 +1225,7 @@ impl<'de> Deserialize<'de> for CompanionState {
             bp,
             battle_stats,
             active_battle,
+            gym_badges,
         })
     }
 }

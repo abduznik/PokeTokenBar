@@ -69,9 +69,36 @@
     bp?: number;
     battleStats?: BattleStatsRecord;
     activeBattle?: ActiveBattleState | null;
+    gymBadges?: string[];
+    gymLeaders?: GymLeaderStatusView[];
     state?: {
       usedSinceInstall?: number;
     };
+  }
+
+  interface GymLeaderDef {
+    id: string;
+    name: string;
+    title: string;
+    gymCity: string;
+    badgeId: string;
+    badgeName: string;
+    badgeIcon: string;
+    signatureSpeciesId: number;
+    signatureName: string;
+    level: number;
+    elementTypes: string[];
+    unlockReq: string;
+    rewardBp: number;
+    rewardCoins: number;
+    quoteBefore: string;
+    quoteWin: string;
+  }
+
+  interface GymLeaderStatusView {
+    leader: GymLeaderDef;
+    isUnlocked: boolean;
+    isDefeated: boolean;
   }
 
   interface BattleMove {
@@ -129,6 +156,7 @@
     rewardBp: number;
     rewardCoins: number;
     won?: boolean | null;
+    gymLeaderId?: string | null;
   }
 
   interface BattleStatsRecord {
@@ -256,8 +284,31 @@
 
   // ⚔️ Battle Arena State & Actions
   let selectedFighterSpeciesId = $state<number | null>(null);
+  let arenaSubMode = $state<"wild" | "gym">("wild");
   let isExecutingMove = $state(false);
   let arenaNotice = $state<string | null>(null);
+
+  interface GymBadgeInfo {
+    id: string;
+    name: string;
+    city: string;
+    leader: string;
+    icon: string;
+    type: string;
+    color: string;
+    bgGradient: string;
+  }
+
+  const KANTO_BADGES: GymBadgeInfo[] = [
+    { id: "boulder", name: "Boulder Badge", city: "Pewter City", leader: "Brock", icon: "🪨", type: "Rock", color: "#A8A878", bgGradient: "linear-gradient(135deg, #78716C, #44403C)" },
+    { id: "cascade", name: "Cascade Badge", city: "Cerulean City", leader: "Misty", icon: "💧", type: "Water", color: "#38BDF8", bgGradient: "linear-gradient(135deg, #0284C7, #0369A1)" },
+    { id: "thunder", name: "Thunder Badge", city: "Vermilion City", leader: "Lt. Surge", icon: "⚡", type: "Electric", color: "#FACC15", bgGradient: "linear-gradient(135deg, #EAB308, #CA8A04)" },
+    { id: "rainbow", name: "Rainbow Badge", city: "Celadon City", leader: "Erika", icon: "🌈", type: "Grass", color: "#4ADE80", bgGradient: "linear-gradient(135deg, #FF6B6B, #4ECDC4, #FFE66D)" },
+    { id: "soul", name: "Soul Badge", city: "Fuchsia City", leader: "Koga", icon: "💜", type: "Poison", color: "#C084FC", bgGradient: "linear-gradient(135deg, #9333EA, #7E22CE)" },
+    { id: "marsh", name: "Marsh Badge", city: "Saffron City", leader: "Sabrina", icon: "🔮", type: "Psychic", color: "#F472B6", bgGradient: "linear-gradient(135deg, #DB2777, #BE185D)" },
+    { id: "volcano", name: "Volcano Badge", city: "Cinnabar Island", leader: "Blaine", icon: "🔥", type: "Fire", color: "#FB923C", bgGradient: "linear-gradient(135deg, #EA580C, #C2410C)" },
+    { id: "earth", name: "Earth Badge", city: "Viridian City", leader: "Giovanni", icon: "🌍", type: "Ground", color: "#FBBF24", bgGradient: "linear-gradient(135deg, #D97706, #78350F)" },
+  ];
 
   async function startArenaBattle(speciesId?: number | null) {
     try {
@@ -265,6 +316,20 @@
       if (res) snap = res;
     } catch (e) {
       console.error("Failed to start battle:", e);
+    }
+  }
+
+  async function startGymBattle(leaderId: string, speciesId?: number | null) {
+    try {
+      const res = await invoke<Snapshot>("start_gym_battle", {
+        leaderId,
+        speciesId: speciesId ?? selectedFighterSpeciesId,
+      });
+      if (res) snap = res;
+    } catch (e: any) {
+      console.error("Failed to start gym battle:", e);
+      arenaNotice = typeof e === "string" ? e : "Could not challenge Gym Leader";
+      setTimeout(() => { arenaNotice = null; }, 3000);
     }
   }
 
@@ -1900,10 +1965,47 @@
                     </div>
                     <div class="mini-stat">
                       <span class="stat-lbl">RIBBONS</span>
-                      <span class="stat-val">{(c.ribbons ?? []).length} / 11</span>
+                      <span class="stat-val">{(c.ribbons ?? []).length} / 12</span>
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+
+            <!-- 🏛️ Kanto Gym Badge Case (Orden-Schatulle) -->
+            <div class="badge-case-card">
+              <div class="badge-case-header">
+                <div class="badge-case-title-box">
+                  <span class="badge-case-icon">🏛️</span>
+                  <div>
+                    <h3 class="badge-case-heading">Kanto Gym Badge Case</h3>
+                    <p class="badge-case-subheading">Official league honors awarded by defeating the 8 Kanto Gym Leaders</p>
+                  </div>
+                </div>
+                <div class="badge-case-tally">
+                  <span class="badge-tally-num">{(c.gymBadges ?? []).length} / 8</span>
+                  <span class="badge-tally-lbl">BADGES</span>
+                </div>
+              </div>
+
+              <div class="badge-case-grid">
+                {#each KANTO_BADGES as badge}
+                  {@const isUnlocked = (c.gymBadges ?? []).includes(badge.id)}
+                  <div
+                    class="badge-slot"
+                    class:badge-unlocked={isUnlocked}
+                    class:badge-locked={!isUnlocked}
+                    title="{badge.name} ({badge.city} — Leader {badge.leader}){isUnlocked ? ' • Cleared! 🏆' : ' • Locked (Defeat Leader in Arena)'}"
+                  >
+                    <div
+                      class="badge-metallic-base"
+                      style={isUnlocked ? `background: ${badge.bgGradient}; border-color: ${badge.color}; box-shadow: 0 0 14px ${badge.color}66;` : ""}
+                    >
+                      <span class="badge-icon-glyph">{badge.icon}</span>
+                    </div>
+                    <span class="badge-name-lbl" style={isUnlocked ? `color: ${badge.color}` : ""}>{badge.name.replace(" Badge", "")}</span>
+                  </div>
+                {/each}
               </div>
             </div>
 
@@ -2215,9 +2317,15 @@
                       </div>
 
                       <div class="result-actions-row">
-                        <button class="result-action-btn next-battle-btn" onclick={() => startArenaBattle()}>
-                          ⚔️ Battle Next Opponent ➔
-                        </button>
+                        {#if b.gymLeaderId}
+                          <button class="result-action-btn next-battle-btn" onclick={clearArenaBattle}>
+                            🏛️ Return to Gym Gauntlet
+                          </button>
+                        {:else}
+                          <button class="result-action-btn next-battle-btn" onclick={() => startArenaBattle()}>
+                            ⚔️ Battle Next Opponent ➔
+                          </button>
+                        {/if}
                         <button class="result-action-btn leave-arena-btn" onclick={clearArenaBattle}>
                           Back to Lobby
                         </button>
@@ -2236,9 +2344,15 @@
                       </div>
 
                       <div class="result-actions-row">
-                        <button class="result-action-btn retry-battle-btn" onclick={() => startArenaBattle()}>
-                          🔄 Rematch / Try Again
-                        </button>
+                        {#if b.gymLeaderId}
+                          <button class="result-action-btn retry-battle-btn" onclick={() => startGymBattle(b.gymLeaderId!)}>
+                            🔄 Rematch Gym Leader
+                          </button>
+                        {:else}
+                          <button class="result-action-btn retry-battle-btn" onclick={() => startArenaBattle()}>
+                            🔄 Rematch / Try Again
+                          </button>
+                        {/if}
                         <button class="result-action-btn leave-arena-btn" onclick={clearArenaBattle}>
                           Back to Lobby
                         </button>
@@ -2284,6 +2398,29 @@
                     <span>✨ {arenaNotice}</span>
                   </div>
                 {/if}
+
+                <!-- Segmented Arena Mode Selector -->
+                <div class="arena-mode-toggle-bar">
+                  <button
+                    type="button"
+                    class="arena-mode-toggle-btn"
+                    class:active={arenaSubMode === 'wild'}
+                    onclick={() => { arenaSubMode = 'wild'; }}
+                  >
+                    <span class="mode-icon">⚡</span>
+                    <span>Wild Matchmaking</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="arena-mode-toggle-btn"
+                    class:active={arenaSubMode === 'gym'}
+                    onclick={() => { arenaSubMode = 'gym'; }}
+                  >
+                    <span class="mode-icon">🏛️</span>
+                    <span>Gym Leader Gauntlet</span>
+                    <span class="gym-badge-pill-count">{(c.gymBadges ?? []).length}/8</span>
+                  </button>
+                </div>
 
                 <!-- Selected Combatant Preparation Card -->
                 <div class="fighter-prep-card">
@@ -2342,16 +2479,122 @@
                     </div>
                   </div>
 
-                  <!-- Action Matchmaking Button -->
-                  <button
-                    type="button"
-                    class="start-battle-main-btn"
-                    onclick={() => startArenaBattle()}
-                  >
-                    <span class="btn-sword-icon">⚔️</span>
-                    <span>ENTER BATTLE ARENA</span>
-                  </button>
+                  {#if arenaSubMode === 'wild'}
+                    <!-- Action Matchmaking Button -->
+                    <button
+                      type="button"
+                      class="start-battle-main-btn"
+                      onclick={() => startArenaBattle()}
+                    >
+                      <span class="btn-sword-icon">⚔️</span>
+                      <span>ENTER WILD BATTLE ARENA</span>
+                    </button>
+                  {/if}
                 </div>
+
+                {#if arenaSubMode === 'gym'}
+                  <!-- 🏛️ 8 Gym Leaders & Boss-Bounties Campaign -->
+                  <div class="gym-gauntlet-section">
+                    <div class="gym-gauntlet-header">
+                      <div class="ggh-left">
+                        <span class="ggh-title">🏛️ The 8 Kanto Gym Leaders</span>
+                        <span class="ggh-sub">Defeat all 8 leaders to claim their Badges, bounties, and become League Champion!</span>
+                      </div>
+                      <div class="ggh-progress">
+                        <span class="ggh-prog-text">{(c.gymBadges ?? []).length} of 8 Badges Claimed</span>
+                      </div>
+                    </div>
+
+                    <div class="gym-leaders-grid">
+                      {#each c.gymLeaders ?? [] as gl}
+                        {@const leader = gl.leader}
+                        {@const isDefeated = gl.isDefeated}
+                        {@const isUnlocked = gl.isUnlocked}
+                        <div
+                          class="gym-leader-card"
+                          class:leader-defeated={isDefeated}
+                          class:leader-locked={!isUnlocked}
+                          class:leader-ready={isUnlocked && !isDefeated}
+                        >
+                          <div class="gl-card-header">
+                            <div class="gl-city-tag">{leader.gymCity}</div>
+                            <div class="gl-badge-tag" title={leader.badgeName}>
+                              <span>{leader.badgeIcon}</span>
+                              <span class="gl-bname">{leader.badgeName}</span>
+                            </div>
+                          </div>
+
+                          <div class="gl-card-body">
+                            <div class="gl-avatar-box">
+                              <img
+                                class="gl-signature-sprite"
+                                src={spriteUrl(leader.signatureSpeciesId, false, true)}
+                                alt={leader.signatureName}
+                                onerror={(e) => fallbackStaticSprite(e, leader.signatureSpeciesId, false)}
+                              />
+                              <span class="gl-mon-lvl">Lv. {leader.level}</span>
+                            </div>
+
+                            <div class="gl-details-col">
+                              <div class="gl-name-row">
+                                <h4 class="gl-leader-name">{leader.name}</h4>
+                                <span class="gl-title-tag">{leader.title}</span>
+                              </div>
+
+                              <p class="gl-quote">"{isDefeated ? leader.quoteWin : leader.quoteBefore}"</p>
+
+                              <div class="gl-specs-row">
+                                <span class="gl-signature-text">Ace: <strong>{leader.signatureName}</strong></span>
+                                <div class="gl-types-box">
+                                  {#each leader.elementTypes as el}
+                                    {@const elCol = getElementColor(el)}
+                                    <span class="gl-type-pill" style="color: {elCol.text}; background: {elCol.bg}; border: {elCol.border};">
+                                      {el}
+                                    </span>
+                                  {/each}
+                                </div>
+                              </div>
+
+                              <div class="gl-rewards-row">
+                                <span class="gl-rew-pill bp">🏆 +{leader.rewardBp} BP</span>
+                                <span class="gl-rew-pill coins">🪙 +{leader.rewardCoins} Coins</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div class="gl-card-footer">
+                            {#if isDefeated}
+                              <div class="gl-status-cleared">
+                                <span class="cleared-star">🏅</span>
+                                <span>BADGE CLAIMED</span>
+                              </div>
+                              <button
+                                type="button"
+                                class="gl-action-btn gl-rematch-btn"
+                                onclick={() => startGymBattle(leader.id)}
+                              >
+                                ⚔️ Rematch
+                              </button>
+                            {:else if isUnlocked}
+                              <button
+                                type="button"
+                                class="gl-action-btn gl-challenge-btn"
+                                onclick={() => startGymBattle(leader.id)}
+                              >
+                                ⚔️ Challenge {leader.name}
+                              </button>
+                            {:else}
+                              <div class="gl-locked-box">
+                                <span class="lock-icon">🔒</span>
+                                <span class="lock-desc">{leader.unlockReq}</span>
+                              </div>
+                            {/if}
+                          </div>
+                        </div>
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
 
                 <!-- Arena Career Stats Grid -->
                 <div class="arena-stats-grid">
@@ -5148,6 +5391,135 @@
     color: #E2E8F0;
   }
 
+  /* 🏛️ Kanto Gym Badge Case */
+  .badge-case-card {
+    padding: 16px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, rgba(20, 24, 35, 0.95), rgba(12, 14, 20, 0.98));
+    border: 1px solid rgba(252, 211, 77, 0.25);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), inset 0 0 20px rgba(0, 0, 0, 0.6);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .badge-case-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .badge-case-title-box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .badge-case-icon { font-size: 20px; filter: drop-shadow(0 0 8px rgba(252, 211, 77, 0.4)); }
+  .badge-case-heading {
+    font-size: 13px;
+    font-weight: 800;
+    color: #F8FAFC;
+    margin: 0;
+    letter-spacing: -0.2px;
+  }
+  .badge-case-subheading {
+    font-size: 10px;
+    color: #94A3B8;
+    margin: 2px 0 0 0;
+  }
+
+  .badge-case-tally {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 1px;
+    padding: 4px 10px;
+    border-radius: 8px;
+    background: rgba(252, 211, 77, 0.1);
+    border: 1px solid rgba(252, 211, 77, 0.25);
+  }
+  .badge-tally-num {
+    font-size: 13px;
+    font-weight: 900;
+    color: #FCD34D;
+    font-family: monospace;
+  }
+  .badge-tally-lbl {
+    font-size: 8px;
+    font-weight: 800;
+    color: #8B93A7;
+    letter-spacing: 0.05em;
+  }
+
+  .badge-case-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    padding: 8px 4px;
+  }
+
+  .badge-slot {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 4px;
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    transition: all 0.2s ease;
+    cursor: default;
+  }
+  .badge-slot:hover {
+    transform: translateY(-2px);
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .badge-metallic-base {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1.5px dashed rgba(255, 255, 255, 0.15);
+    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  .badge-unlocked .badge-metallic-base {
+    border-style: solid;
+    animation: badge-pulse 3s infinite alternate;
+  }
+
+  .badge-locked .badge-metallic-base {
+    filter: grayscale(1) opacity(0.35);
+  }
+
+  @keyframes badge-pulse {
+    0% { transform: scale(1); }
+    100% { transform: scale(1.05); }
+  }
+
+  .badge-icon-glyph {
+    font-size: 20px;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+  }
+
+  .badge-name-lbl {
+    font-size: 9.5px;
+    font-weight: 800;
+    color: #64748B;
+    text-align: center;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 68px;
+  }
+
   /* 🟩 GitHub-Style Heatmap Section */
   .heatmap-section-card {
     padding: 14px;
@@ -5743,6 +6115,349 @@
     transform: translateY(-2px);
     box-shadow: 0 6px 20px rgba(239, 68, 68, 0.6);
     filter: brightness(1.1);
+  }
+
+  /* ⚡ Segmented Arena Mode Selector */
+  .arena-mode-toggle-bar {
+    display: flex;
+    gap: 8px;
+    background: rgba(0, 0, 0, 0.35);
+    padding: 4px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .arena-mode-toggle-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-radius: 9px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: #94A3B8;
+    font-size: 11.5px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .arena-mode-toggle-btn:hover {
+    color: #E2E8F0;
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .arena-mode-toggle-btn.active {
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.25), rgba(245, 158, 11, 0.2));
+    border-color: rgba(239, 68, 68, 0.4);
+    color: #F8FAFC;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  }
+
+  .gym-badge-pill-count {
+    font-size: 9.5px;
+    font-weight: 900;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(252, 211, 77, 0.2);
+    color: #FCD34D;
+    border: 1px solid rgba(252, 211, 77, 0.35);
+  }
+
+  /* 🏛️ Gym Leader Gauntlet Section */
+  .gym-gauntlet-section {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .gym-gauntlet-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  .ggh-left {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .ggh-title {
+    font-size: 13px;
+    font-weight: 800;
+    color: #F8FAFC;
+  }
+  .ggh-sub {
+    font-size: 10px;
+    color: #94A3B8;
+  }
+  .ggh-progress {
+    padding: 4px 10px;
+    border-radius: 8px;
+    background: rgba(59, 130, 246, 0.12);
+    border: 1px solid rgba(59, 130, 246, 0.25);
+  }
+  .ggh-prog-text {
+    font-size: 10px;
+    font-weight: 800;
+    color: #93C5FD;
+  }
+
+  .gym-leaders-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+
+  .gym-leader-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 14px;
+    border-radius: 14px;
+    background: rgba(18, 22, 32, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    transition: all 0.2s ease;
+    gap: 10px;
+  }
+
+  .gym-leader-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  }
+
+  .gym-leader-card.leader-defeated {
+    border-color: rgba(34, 197, 94, 0.35);
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.06), rgba(18, 22, 32, 0.95));
+  }
+
+  .gym-leader-card.leader-ready {
+    border-color: rgba(245, 158, 11, 0.45);
+    box-shadow: 0 0 16px rgba(245, 158, 11, 0.12);
+  }
+
+  .gym-leader-card.leader-locked {
+    opacity: 0.65;
+    background: rgba(12, 14, 20, 0.7);
+    border-color: rgba(255, 255, 255, 0.04);
+  }
+
+  .gl-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .gl-city-tag {
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    color: #8B93A7;
+    text-transform: uppercase;
+  }
+  .gl-badge-tag {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 10px;
+    font-weight: 800;
+    color: #FCD34D;
+  }
+
+  .gl-card-body {
+    display: flex;
+    gap: 12px;
+  }
+
+  .gl-avatar-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 64px;
+    height: 64px;
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .gl-signature-sprite {
+    width: 48px;
+    height: 48px;
+    image-rendering: pixelated;
+    filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
+  }
+
+  .gl-mon-lvl {
+    position: absolute;
+    bottom: -4px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    font-size: 8px;
+    font-weight: 800;
+    color: #F8FAFC;
+  }
+
+  .gl-details-col {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .gl-name-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .gl-leader-name {
+    font-size: 13px;
+    font-weight: 900;
+    color: #F8FAFC;
+    margin: 0;
+  }
+  .gl-title-tag {
+    font-size: 9px;
+    color: #94A3B8;
+    font-style: italic;
+  }
+
+  .gl-quote {
+    font-size: 9.5px;
+    color: #CBD5E1;
+    margin: 0;
+    line-height: 1.3;
+    font-style: italic;
+    opacity: 0.85;
+  }
+
+  .gl-specs-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    margin-top: 2px;
+  }
+  .gl-signature-text {
+    font-size: 9.5px;
+    color: #8B93A7;
+  }
+  .gl-signature-text strong {
+    color: #E2E8F0;
+  }
+  .gl-types-box {
+    display: flex;
+    gap: 3px;
+  }
+  .gl-type-pill {
+    font-size: 8px;
+    font-weight: 800;
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  .gl-rewards-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 2px;
+  }
+  .gl-rew-pill {
+    font-size: 9px;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 6px;
+  }
+  .gl-rew-pill.bp {
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    color: #FCD34D;
+  }
+  .gl-rew-pill.coins {
+    background: rgba(59, 130, 246, 0.12);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    color: #93C5FD;
+  }
+
+  .gl-card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .gl-status-cleared {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 9.5px;
+    font-weight: 900;
+    color: #4ADE80;
+    letter-spacing: 0.04em;
+  }
+
+  .gl-action-btn {
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 10.5px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: none;
+  }
+
+  .gl-challenge-btn {
+    width: 100%;
+    background: linear-gradient(135deg, #EF4444, #F59E0B);
+    color: #FFFFFF;
+    box-shadow: 0 2px 10px rgba(239, 68, 68, 0.35);
+  }
+  .gl-challenge-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(239, 68, 68, 0.5);
+  }
+
+  .gl-rematch-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #E2E8F0;
+  }
+  .gl-rematch-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .gl-locked-box {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    width: 100%;
+  }
+  .gl-locked-box .lock-icon { font-size: 11px; }
+  .gl-locked-box .lock-desc {
+    font-size: 9px;
+    color: #8B93A7;
+    font-weight: 600;
+    line-height: 1.2;
   }
 
   /* 📊 Arena Career Stats Grid */

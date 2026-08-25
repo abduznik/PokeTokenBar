@@ -11,8 +11,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned
 - 🎶 Retro Pokémon 8-bit Sound Effects & Cry synth
-- 🏆 Gym Leader Boss Battles & Coding Bounties
 - 🌲 Customizable Ecosystem Habitats & Weather Effects
+
+---
+
+## [0.4.1] - 2026-08-25
+
+### Added
+- **🏆 8 Gym Leaders & Boss-Bounties Campaign (Arena 2.0)**:
+  - **8 Iconic Kanto Gym Leaders**: Added retro Gym Leaders with custom AI coding lore, signature Pokémon aces, progressive levels (20–90), dialogue quotes, and bounties:
+    1. **Brock** (Pewter City Gym • *Rock-Solid Architecture*) — Onix Lv. 20, 🪨 Boulder Badge (+50 BP, 250 Coins).
+    2. **Misty** (Cerulean City Gym • *Async & Stream Flow*) — Starmie Lv. 30, 💧 Cascade Badge (+75 BP, 500 Coins).
+    3. **Lt. Surge** (Vermilion City Gym • *Mega Overdrive Surge*) — Raichu Lv. 40, ⚡ Thunder Badge (+100 BP, 750 Coins).
+    4. **Erika** (Celadon City Gym • *Green Code & Clean Docs*) — Vileplume Lv. 50, 🌈 Rainbow Badge (+125 BP, 1,000 Coins).
+    5. **Koga** (Fuchsia City Gym • *Ninja Refactoring & Stealth Fixes*) — Weezing Lv. 60, 💜 Soul Badge (+150 BP, 1,250 Coins).
+    6. **Sabrina** (Saffron City Gym • *Neural Network Precognition*) — Alakazam Lv. 70, 🔮 Marsh Badge (+200 BP, 1,500 Coins).
+    7. **Blaine** (Cinnabar Island Gym • *High-Burn Inference*) — Arcanine Lv. 80, 🔥 Volcano Badge (+250 BP, 2,000 Coins).
+    8. **Giovanni** (Viridian City Gym • *AI Mastermind*) — Rhydon Lv. 90, 🌍 Earth Badge (+500 BP, 5,000 Coins).
+  - **Arena Tab Segmented Mode Selector**: Toggle between `⚡ Wild Matchmaking` for fast randomized duels and `🏛️ Gym Leader Gauntlet` with leader cards, battle quotes, and challenge buttons.
+  - **🏛️ Kanto Gym Badge Case (Orden-Schatulle)**: Integrated retro badge case in the `🪪 Trainer Passport` tab showcasing 8 metallic glowing badges with pulsing animations when unlocked and mystery silhouettes when locked.
+  - **Coding Bounties & Unlock Progression**: Progressive unlock requirements tied to real coding milestones (token burn volume, prior badge progression, Overdrive status, win streaks, and earned ribbons).
+  - **PokéJournal Golden Badge Entries**: Victorious Gym Leader battles auto-generate prestigious golden journal entries commemorating each claimed Badge.
+  - **343 Unit Tests**: Expanded test suite with verification for gym unlock requirements, battle execution, badge awarding, and rematch mechanics.
 
 ---
 

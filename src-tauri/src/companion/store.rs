@@ -899,9 +899,11 @@ impl CompanionStore {
     // ⚔️ Battle Arena Methods (v0.4.0)
     // ==========================================
 
-    pub fn start_battle(&mut self, species_id: Option<i64>) -> Result<(), String> {
-        let (fighter_id, fighter_name, is_shiny, stage, ribbons) = if let Some(req_id) = species_id
-        {
+    fn build_player_fighter_for_battle(
+        &self,
+        species_id: Option<i64>,
+    ) -> Result<crate::domain::battle::BattleFighter, String> {
+        let (fighter_id, fighter_name, is_shiny, stage, ribbons) = if let Some(req_id) = species_id {
             if let Some(active) = self
                 .state
                 .active
@@ -974,16 +976,67 @@ impl CompanionStore {
             return Err("No companion or registered Pokémon available for battle!".to_string());
         };
 
-        let player = crate::domain::battle::build_fighter(
+        Ok(crate::domain::battle::build_fighter(
             fighter_id,
             &fighter_name,
             is_shiny,
             stage,
             ribbons.len() as u32,
             self.is_mega_overdrive,
-        );
+        ))
+    }
 
-        let opponent = crate::domain::battle::generate_random_opponent(stage);
+    pub fn is_gym_leader_unlocked(&self, leader_id: &str) -> bool {
+        let has_boulder = self.state.gym_badges.contains(&"boulder".to_string());
+        let has_cascade = self.state.gym_badges.contains(&"cascade".to_string());
+        let has_thunder = self.state.gym_badges.contains(&"thunder".to_string());
+        let has_rainbow = self.state.gym_badges.contains(&"rainbow".to_string());
+        let has_soul = self.state.gym_badges.contains(&"soul".to_string());
+        let has_marsh = self.state.gym_badges.contains(&"marsh".to_string());
+        let has_volcano = self.state.gym_badges.contains(&"volcano".to_string());
+
+        let total_tokens = self.state.used_since_install;
+
+        match leader_id.to_lowercase().as_str() {
+            "brock" => total_tokens >= 1_000_000 || !self.state.dex.is_empty() || self.state.active.is_some(),
+            "misty" => has_boulder && (total_tokens >= 10_000_000 || self.state.dex.len() >= 2),
+            "lt_surge" => has_cascade && (self.is_mega_overdrive || total_tokens >= 20_000_000 || self.has_any_ribbon("overdrive")),
+            "erika" => has_thunder && (self.state.journal.iter().any(|j| j.kind == "item" || j.kind == "berry") || total_tokens >= 30_000_000),
+            "koga" => has_rainbow && (total_tokens >= 50_000_000 || self.state.dex.len() >= 4),
+            "sabrina" => has_soul && (self.state.battle_stats.best_streak >= 3 || self.state.battle_stats.wins >= 5 || total_tokens >= 75_000_000),
+            "blaine" => has_marsh && (total_tokens >= 100_000_000 || self.unique_ribbons_count() >= 3),
+            "giovanni" => has_volcano && (self.unique_ribbons_count() >= 5 || total_tokens >= 150_000_000),
+            _ => false,
+        }
+    }
+
+    pub fn has_any_ribbon(&self, ribbon: &str) -> bool {
+        if let Some(ref a) = self.state.active {
+            if a.ribbons.iter().any(|r| r == ribbon) {
+                return true;
+            }
+        }
+        self.state.dex.iter().any(|d| d.ribbons.iter().any(|r| r == ribbon))
+    }
+
+    pub fn unique_ribbons_count(&self) -> usize {
+        let mut set = HashSet::new();
+        if let Some(ref a) = self.state.active {
+            for r in &a.ribbons {
+                set.insert(r.clone());
+            }
+        }
+        for d in &self.state.dex {
+            for r in &d.ribbons {
+                set.insert(r.clone());
+            }
+        }
+        set.len()
+    }
+
+    pub fn start_battle(&mut self, species_id: Option<i64>) -> Result<(), String> {
+        let player = self.build_player_fighter_for_battle(species_id)?;
+        let opponent = crate::domain::battle::generate_random_opponent(player.stage);
         let battle_id = Uuid::new_v4().to_string();
 
         let initial_log = crate::domain::battle::BattleLogEntry {
@@ -1007,8 +1060,214 @@ impl CompanionStore {
             reward_bp: 0,
             reward_coins: 0,
             won: None,
+            gym_leader_id: None,
         });
 
+        self.save();
+        Ok(())
+    }
+
+    pub fn start_gym_battle(
+        &mut self,
+        leader_id: &str,
+        species_id: Option<i64>,
+    ) -> Result<(), String> {
+        let leader = crate::domain::battle::find_gym_leader(leader_id)
+            .ok_or_else(|| format!("Gym Leader '{}' not found", leader_id))?;
+
+        if !self.is_gym_leader_unlocked(&leader.id) {
+            return Err(format!("Gym Leader {} is locked: {}", leader.name, leader.unlock_req));
+        }
+
+        let player = self.build_player_fighter_for_battle(species_id)?;
+        let opponent = crate::domain::battle::build_gym_leader_fighter(&leader);
+        let battle_id = Uuid::new_v4().to_string();
+
+        let initial_log = crate::domain::battle::BattleLogEntry {
+            id: Uuid::new_v4().to_string(),
+            text: format!(
+                "Gym Leader {} challenges you to a battle! \"{}\"",
+                leader.name, leader.quote_before
+            ),
+            actor: "system".into(),
+            damage: None,
+            is_crit: false,
+            effectiveness: "normal".into(),
+            timestamp: (self.clock)().timestamp_millis() as u64,
+        };
+
+        self.state.active_battle = Some(crate::domain::battle::ActiveBattleState {
+            battle_id,
+            turn_count: 1,
+            player,
+            opponent,
+            is_player_turn: true,
+            battle_phase: "selecting".into(),
+            battle_log: vec![initial_log],
+            reward_bp: 0,
+            reward_coins: 0,
+            won: None,
+            gym_leader_id: Some(leader.id.clone()),
+        });
+
+        self.save();
+        Ok(())
+    }
+
+    fn handle_battle_victory(
+        &mut self,
+        mut battle: crate::domain::battle::ActiveBattleState,
+        ts: u64,
+    ) -> Result<(), String> {
+        battle.opponent.current_hp = 0;
+        battle.battle_phase = "won".into();
+        battle.won = Some(true);
+
+        let coin_mult = if self.is_mega_overdrive { 2 } else { 1 };
+
+        let (final_bp, final_coins, win_log, journal_title, journal_body, journal_icon) =
+            if let Some(ref gid) = battle.gym_leader_id {
+                let leader = crate::domain::battle::find_gym_leader(gid);
+                if let Some(ld) = leader {
+                    let bp_rew = ld.reward_bp;
+                    let coin_rew = ld.reward_coins * coin_mult;
+                    let is_new_badge = !self.state.gym_badges.contains(&ld.badge_id);
+                    if is_new_badge {
+                        self.state.gym_badges.push(ld.badge_id.clone());
+                    }
+
+                    let log_msg = format!(
+                        "Gym Leader {} was defeated! \"{}\" You claimed +{} BP, +{} Coins & the {}! 🏆",
+                        ld.name, ld.quote_win, bp_rew, coin_rew, ld.badge_name
+                    );
+                    let j_title = format!("{} Defeated — {} 🏆", ld.name, ld.badge_name);
+                    let j_body = format!(
+                        "{} triumphed over {} in the Gym. \"{}\"",
+                        battle.player.name, ld.name, ld.quote_win
+                    );
+                    (bp_rew, coin_rew, log_msg, j_title, j_body, ld.badge_icon)
+                } else {
+                    let bp_rew = 50;
+                    let coin_rew = 250 * coin_mult;
+                    let log_msg = format!("Gym Leader defeated! Won +{} BP & +{} Coins!", bp_rew, coin_rew);
+                    (
+                        bp_rew,
+                        coin_rew,
+                        log_msg,
+                        "Gym Leader Defeated! 🏆".into(),
+                        "Claimed victory in the Gym!".into(),
+                        "🏆".into(),
+                    )
+                }
+            } else {
+                let base_bp = 25;
+                let streak_bonus = (self.state.battle_stats.win_streak / 3) * 10;
+                let bp_rew = base_bp + streak_bonus;
+                let coin_rew = 100 * coin_mult;
+                let log_msg = format!(
+                    "Foe {} fainted! Victory! Earned +{} BP and +{} PokéCoins! 🎉",
+                    battle.opponent.name, bp_rew, coin_rew
+                );
+                let j_title = format!("Arena Victory vs {}! ⚔️", battle.opponent.name);
+                let j_body = format!(
+                    "{} triumphed in the Arena and claimed +{} BP!",
+                    battle.player.name, bp_rew
+                );
+                (bp_rew, coin_rew, log_msg, j_title, j_body, "⚔️".into())
+            };
+
+        battle.reward_bp = final_bp;
+        battle.reward_coins = final_coins;
+
+        self.state.bp += final_bp;
+        self.state.battle_stats.wins += 1;
+        self.state.battle_stats.win_streak += 1;
+        self.state.battle_stats.total_battles += 1;
+        self.state.battle_stats.total_bp_earned += final_bp;
+        if self.state.battle_stats.win_streak > self.state.battle_stats.best_streak {
+            self.state.battle_stats.best_streak = self.state.battle_stats.win_streak;
+        }
+
+        if let Some(active) = self.state.active.as_mut() {
+            active.add_ribbon("arenaChampion");
+        }
+
+        battle.battle_log.insert(
+            0,
+            crate::domain::battle::BattleLogEntry {
+                id: Uuid::new_v4().to_string(),
+                text: win_log,
+                actor: "system".into(),
+                damage: None,
+                is_crit: false,
+                effectiveness: "normal".into(),
+                timestamp: ts + 1,
+            },
+        );
+
+        self.add_journal_entry(
+            "battle",
+            &journal_title,
+            &journal_body,
+            &journal_icon,
+            Some(battle.player.species_id),
+            battle.player.is_shiny,
+        );
+
+        self.state.active_battle = Some(battle);
+        self.save();
+        Ok(())
+    }
+
+    fn handle_battle_defeat(
+        &mut self,
+        mut battle: crate::domain::battle::ActiveBattleState,
+        ts: u64,
+    ) -> Result<(), String> {
+        battle.player.current_hp = 0;
+        battle.battle_phase = "lost".into();
+        battle.won = Some(false);
+
+        let consolation_bp = 5;
+        let consolation_coins = 20;
+        battle.reward_bp = consolation_bp;
+        battle.reward_coins = consolation_coins;
+
+        self.state.bp += consolation_bp;
+        self.state.battle_stats.losses += 1;
+        self.state.battle_stats.win_streak = 0;
+        self.state.battle_stats.total_battles += 1;
+        self.state.battle_stats.total_bp_earned += consolation_bp;
+
+        battle.battle_log.insert(
+            0,
+            crate::domain::battle::BattleLogEntry {
+                id: Uuid::new_v4().to_string(),
+                text: format!(
+                    "{} fainted! You lost the battle. (+{} BP consolation)",
+                    battle.player.name, consolation_bp
+                ),
+                actor: "system".into(),
+                damage: None,
+                is_crit: false,
+                effectiveness: "normal".into(),
+                timestamp: ts + 1,
+            },
+        );
+
+        self.add_journal_entry(
+            "battle",
+            &format!("Arena Defeat vs {}", battle.opponent.name),
+            &format!(
+                "{} fought bravely against {}.",
+                battle.player.name, battle.opponent.name
+            ),
+            "⚔️",
+            Some(battle.player.species_id),
+            battle.player.is_shiny,
+        );
+
+        self.state.active_battle = Some(battle);
         self.save();
         Ok(())
     }
@@ -1138,63 +1397,7 @@ impl CompanionStore {
 
             // Check if Opponent fainted
             if battle.opponent.is_fainted() {
-                battle.opponent.current_hp = 0;
-                battle.battle_phase = "won".into();
-                battle.won = Some(true);
-
-                let base_bp = 25;
-                let streak_bonus = (self.state.battle_stats.win_streak / 3) * 10;
-                let final_bp = base_bp + streak_bonus;
-                let coin_mult = if self.is_mega_overdrive { 2 } else { 1 };
-                let final_coins = 100 * coin_mult;
-
-                battle.reward_bp = final_bp;
-                battle.reward_coins = final_coins;
-
-                self.state.bp += final_bp;
-                self.state.battle_stats.wins += 1;
-                self.state.battle_stats.win_streak += 1;
-                self.state.battle_stats.total_battles += 1;
-                self.state.battle_stats.total_bp_earned += final_bp;
-                if self.state.battle_stats.win_streak > self.state.battle_stats.best_streak {
-                    self.state.battle_stats.best_streak = self.state.battle_stats.win_streak;
-                }
-
-                if let Some(active) = self.state.active.as_mut() {
-                    active.add_ribbon("arenaChampion");
-                }
-
-                battle.battle_log.insert(
-                    0,
-                    crate::domain::battle::BattleLogEntry {
-                        id: Uuid::new_v4().to_string(),
-                        text: format!(
-                            "Foe {} fainted! Victory! Earned +{} BP and +{} PokéCoins! 🎉",
-                            battle.opponent.name, final_bp, final_coins
-                        ),
-                        actor: "system".into(),
-                        damage: None,
-                        is_crit: false,
-                        effectiveness: "normal".into(),
-                        timestamp: ts + 1,
-                    },
-                );
-
-                self.add_journal_entry(
-                    "battle",
-                    &format!("Arena Victory vs {}! ⚔️", battle.opponent.name),
-                    &format!(
-                        "{} triumphed in the Arena and claimed +{} BP!",
-                        battle.player.name, final_bp
-                    ),
-                    "⚔️",
-                    Some(battle.player.species_id),
-                    battle.player.is_shiny,
-                );
-
-                self.state.active_battle = Some(battle);
-                self.save();
-                return Ok(());
+                return self.handle_battle_victory(battle, ts);
             }
 
             // Opponent retaliates
@@ -1268,52 +1471,7 @@ impl CompanionStore {
             );
 
             if battle.player.is_fainted() {
-                battle.player.current_hp = 0;
-                battle.battle_phase = "lost".into();
-                battle.won = Some(false);
-
-                let consolation_bp = 5;
-                let consolation_coins = 20;
-                battle.reward_bp = consolation_bp;
-                battle.reward_coins = consolation_coins;
-
-                self.state.bp += consolation_bp;
-                self.state.battle_stats.losses += 1;
-                self.state.battle_stats.win_streak = 0;
-                self.state.battle_stats.total_battles += 1;
-                self.state.battle_stats.total_bp_earned += consolation_bp;
-
-                battle.battle_log.insert(
-                    0,
-                    crate::domain::battle::BattleLogEntry {
-                        id: Uuid::new_v4().to_string(),
-                        text: format!(
-                            "{} fainted! You lost the battle. (+{} BP consolation)",
-                            battle.player.name, consolation_bp
-                        ),
-                        actor: "system".into(),
-                        damage: None,
-                        is_crit: false,
-                        effectiveness: "normal".into(),
-                        timestamp: ts + 3,
-                    },
-                );
-
-                self.add_journal_entry(
-                    "battle",
-                    &format!("Arena Defeat vs {}", battle.opponent.name),
-                    &format!(
-                        "{} fought bravely against {}.",
-                        battle.player.name, battle.opponent.name
-                    ),
-                    "⚔️",
-                    Some(battle.player.species_id),
-                    battle.player.is_shiny,
-                );
-
-                self.state.active_battle = Some(battle);
-                self.save();
-                return Ok(());
+                return self.handle_battle_defeat(battle, ts);
             }
         } else {
             // Opponent strikes first
@@ -1387,52 +1545,7 @@ impl CompanionStore {
             );
 
             if battle.player.is_fainted() {
-                battle.player.current_hp = 0;
-                battle.battle_phase = "lost".into();
-                battle.won = Some(false);
-
-                let consolation_bp = 5;
-                let consolation_coins = 20;
-                battle.reward_bp = consolation_bp;
-                battle.reward_coins = consolation_coins;
-
-                self.state.bp += consolation_bp;
-                self.state.battle_stats.losses += 1;
-                self.state.battle_stats.win_streak = 0;
-                self.state.battle_stats.total_battles += 1;
-                self.state.battle_stats.total_bp_earned += consolation_bp;
-
-                battle.battle_log.insert(
-                    0,
-                    crate::domain::battle::BattleLogEntry {
-                        id: Uuid::new_v4().to_string(),
-                        text: format!(
-                            "{} fainted! You lost the battle. (+{} BP consolation)",
-                            battle.player.name, consolation_bp
-                        ),
-                        actor: "system".into(),
-                        damage: None,
-                        is_crit: false,
-                        effectiveness: "normal".into(),
-                        timestamp: ts + 1,
-                    },
-                );
-
-                self.add_journal_entry(
-                    "battle",
-                    &format!("Arena Defeat vs {}", battle.opponent.name),
-                    &format!(
-                        "{} fought bravely against {}.",
-                        battle.player.name, battle.opponent.name
-                    ),
-                    "⚔️",
-                    Some(battle.player.species_id),
-                    battle.player.is_shiny,
-                );
-
-                self.state.active_battle = Some(battle);
-                self.save();
-                return Ok(());
+                return self.handle_battle_defeat(battle, ts);
             }
 
             // Player retaliates
@@ -1499,63 +1612,7 @@ impl CompanionStore {
             );
 
             if battle.opponent.is_fainted() {
-                battle.opponent.current_hp = 0;
-                battle.battle_phase = "won".into();
-                battle.won = Some(true);
-
-                let base_bp = 25;
-                let streak_bonus = (self.state.battle_stats.win_streak / 3) * 10;
-                let final_bp = base_bp + streak_bonus;
-                let coin_mult = if self.is_mega_overdrive { 2 } else { 1 };
-                let final_coins = 100 * coin_mult;
-
-                battle.reward_bp = final_bp;
-                battle.reward_coins = final_coins;
-
-                self.state.bp += final_bp;
-                self.state.battle_stats.wins += 1;
-                self.state.battle_stats.win_streak += 1;
-                self.state.battle_stats.total_battles += 1;
-                self.state.battle_stats.total_bp_earned += final_bp;
-                if self.state.battle_stats.win_streak > self.state.battle_stats.best_streak {
-                    self.state.battle_stats.best_streak = self.state.battle_stats.win_streak;
-                }
-
-                if let Some(active) = self.state.active.as_mut() {
-                    active.add_ribbon("arenaChampion");
-                }
-
-                battle.battle_log.insert(
-                    0,
-                    crate::domain::battle::BattleLogEntry {
-                        id: Uuid::new_v4().to_string(),
-                        text: format!(
-                            "Foe {} fainted! Victory! Earned +{} BP and +{} PokéCoins! 🎉",
-                            battle.opponent.name, final_bp, final_coins
-                        ),
-                        actor: "system".into(),
-                        damage: None,
-                        is_crit: false,
-                        effectiveness: "normal".into(),
-                        timestamp: ts + 3,
-                    },
-                );
-
-                self.add_journal_entry(
-                    "battle",
-                    &format!("Arena Victory vs {}! ⚔️", battle.opponent.name),
-                    &format!(
-                        "{} triumphed in the Arena and claimed +{} BP!",
-                        battle.player.name, final_bp
-                    ),
-                    "⚔️",
-                    Some(battle.player.species_id),
-                    battle.player.is_shiny,
-                );
-
-                self.state.active_battle = Some(battle);
-                self.save();
-                return Ok(());
+                return self.handle_battle_victory(battle, ts);
             }
         }
 
@@ -5253,6 +5310,50 @@ mod tests {
         assert!(flee_res.is_ok());
         assert!(s.state.active_battle.is_none());
         assert_eq!(s.state.battle_stats.win_streak, 0);
+    }
+
+    #[test]
+    fn test_gym_leader_campaign_and_badges() {
+        let mut s = store_for(linear3(), vec![1, 2, 3]);
+        s.hatch(1);
+        assert!(s.has_active());
+
+        // 1. Check Unlock Requirements
+        assert!(s.is_gym_leader_unlocked("brock"));
+        assert!(!s.is_gym_leader_unlocked("misty"));
+
+        // 2. Start Brock Gym Battle
+        let start_res = s.start_gym_battle("brock", None);
+        assert!(start_res.is_ok());
+        let battle = s.state.active_battle.as_ref().unwrap();
+        assert_eq!(battle.gym_leader_id, Some("brock".to_string()));
+        assert_eq!(battle.opponent.name, "Brock's Onix");
+        assert!(battle.battle_log[0].text.contains("Gym Leader Brock"));
+
+        // 3. Play through Gym battle to victory
+        for _ in 0..30 {
+            if let Some(b) = s.state.active_battle.as_ref() {
+                if b.battle_phase == "selecting" {
+                    let _ = s.execute_battle_move(0);
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        // 4. Verify Boulder Badge is earned
+        assert!(s.state.gym_badges.contains(&"boulder".to_string()));
+        assert!(s.state.bp >= 50);
+
+        // 5. Verify Badge Journal Entry
+        let badge_entry = s.state.journal.iter().find(|j| j.kind == "battle" && j.title.contains("Boulder Badge"));
+        assert!(badge_entry.is_some());
+
+        // 6. Misty Unlock Condition
+        s.state.used_since_install = 12_000_000;
+        assert!(s.is_gym_leader_unlocked("misty"));
     }
 
     impl CompanionStore {

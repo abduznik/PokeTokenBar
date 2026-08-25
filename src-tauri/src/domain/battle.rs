@@ -98,6 +98,8 @@ pub struct ActiveBattleState {
     #[serde(alias = "reward_coins")]
     pub reward_coins: u64,
     pub won: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "gym_leader_id")]
+    pub gym_leader_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -288,6 +290,11 @@ pub fn resolve_species_types(species_id: i64) -> Vec<String> {
         656 | 657 | 658 => vec!["Water".to_string(), "Dark".to_string()], // Greninja line
         131 => vec!["Water".to_string(), "Ice".to_string()],          // Lapras
         66 | 67 | 68 => vec!["Fighting".to_string()],                 // Machamp line
+        95 => vec!["Rock".to_string(), "Ground".to_string()],         // Onix
+        120 | 121 => vec!["Water".to_string(), "Psychic".to_string()], // Staryu / Starmie
+        43 | 44 | 45 => vec!["Grass".to_string(), "Poison".to_string()], // Oddish / Gloom / Vileplume
+        109 | 110 => vec!["Poison".to_string()],                       // Koffing / Weezing
+        111 | 112 => vec!["Ground".to_string(), "Rock".to_string()],   // Rhyhorn / Rhydon
         144 => vec!["Ice".to_string(), "Flying".to_string()],         // Articuno
         145 => vec!["Electric".to_string(), "Flying".to_string()],    // Zapdos
         146 => vec!["Fire".to_string(), "Flying".to_string()],        // Moltres
@@ -804,6 +811,220 @@ pub fn generate_random_opponent(player_stage: u32) -> BattleFighter {
     let opp_stage = player_stage.max(1).min(base_stage);
 
     build_fighter(species_id, name, shiny_roll, opp_stage, 1, false)
+}
+
+/// Gym Leader Campaign definitions for Arena Mode.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GymLeaderDef {
+    pub id: String,
+    pub name: String,
+    pub title: String,
+    pub gym_city: String,
+    pub badge_id: String,
+    pub badge_name: String,
+    pub badge_icon: String,
+    pub signature_species_id: i64,
+    pub signature_name: String,
+    pub level: u32,
+    pub element_types: Vec<String>,
+    pub unlock_req: String,
+    pub reward_bp: u32,
+    pub reward_coins: u64,
+    pub quote_before: String,
+    pub quote_win: String,
+}
+
+pub fn get_gym_leaders() -> Vec<GymLeaderDef> {
+    vec![
+        GymLeaderDef {
+            id: "brock".into(),
+            name: "Brock".into(),
+            title: "Rock-Solid Architecture".into(),
+            gym_city: "Pewter City".into(),
+            badge_id: "boulder".into(),
+            badge_name: "Boulder Badge".into(),
+            badge_icon: "🪨".into(),
+            signature_species_id: 95,
+            signature_name: "Onix".into(),
+            level: 20,
+            element_types: vec!["Rock".into(), "Ground".into()],
+            unlock_req: "Burn at least 1,000,000 lifetime tokens".into(),
+            reward_bp: 50,
+            reward_coins: 250,
+            quote_before: "My rock-hard code structure won't break under any merge conflict!".into(),
+            quote_win: "You proved your architecture has true endurance. Take the Boulder Badge!".into(),
+        },
+        GymLeaderDef {
+            id: "misty".into(),
+            name: "Misty".into(),
+            title: "Async & Reactive Streams".into(),
+            gym_city: "Cerulean City".into(),
+            badge_id: "cascade".into(),
+            badge_name: "Cascade Badge".into(),
+            badge_icon: "💧".into(),
+            signature_species_id: 121,
+            signature_name: "Starmie".into(),
+            level: 30,
+            element_types: vec!["Water".into(), "Psychic".into()],
+            unlock_req: "Burn 10,000,000 lifetime tokens & earn Boulder Badge".into(),
+            reward_bp: 75,
+            reward_coins: 500,
+            quote_before: "My async streams flow without backpressure! Can you keep up with my speed?".into(),
+            quote_win: "Incredible reactivity! You mastered the current. Here is the Cascade Badge!".into(),
+        },
+        GymLeaderDef {
+            id: "lt_surge".into(),
+            name: "Lt. Surge".into(),
+            title: "High-Velocity Mega Overdrive".into(),
+            gym_city: "Vermilion City".into(),
+            badge_id: "thunder".into(),
+            badge_name: "Thunder Badge".into(),
+            badge_icon: "⚡".into(),
+            signature_species_id: 26,
+            signature_name: "Raichu".into(),
+            level: 40,
+            element_types: vec!["Electric".into()],
+            unlock_req: "Trigger Mega Overdrive sprint & earn Cascade Badge".into(),
+            reward_bp: 100,
+            reward_coins: 750,
+            quote_before: "Ten-hut! Let's see if your code can handle high-voltage megawatt sprints!".into(),
+            quote_win: "You've got real lightning in your veins, coder! Take the Thunder Badge!".into(),
+        },
+        GymLeaderDef {
+            id: "erika".into(),
+            name: "Erika".into(),
+            title: "Clean Code & Refactoring".into(),
+            gym_city: "Celadon City".into(),
+            badge_id: "rainbow".into(),
+            badge_name: "Rainbow Badge".into(),
+            badge_icon: "🌈".into(),
+            signature_species_id: 45,
+            signature_name: "Vileplume".into(),
+            level: 50,
+            element_types: vec!["Grass".into(), "Poison".into()],
+            unlock_req: "Feed at least 3 treats/berries to your buddy & earn Thunder Badge".into(),
+            reward_bp: 125,
+            reward_coins: 1000,
+            quote_before: "Beautiful, clean refactored code blossoms like fine flowers. Let's duel gently.".into(),
+            quote_win: "Such elegant craftsmanship! You are worthy of the Rainbow Badge.".into(),
+        },
+        GymLeaderDef {
+            id: "koga".into(),
+            name: "Koga".into(),
+            title: "Bug Ninja & Deep Debugging".into(),
+            gym_city: "Fuchsia City".into(),
+            badge_id: "soul".into(),
+            badge_name: "Soul Badge".into(),
+            badge_icon: "💜".into(),
+            signature_species_id: 110,
+            signature_name: "Weezing".into(),
+            level: 60,
+            element_types: vec!["Poison".into()],
+            unlock_req: "Burn 50,000,000 lifetime tokens & earn Rainbow Badge".into(),
+            reward_bp: 150,
+            reward_coins: 1250,
+            quote_before: "Despair in my maze of subtle edge cases and elusive memory leaks!".into(),
+            quote_win: "You tracked down every bug in the dark. Accept the Soul Badge!".into(),
+        },
+        GymLeaderDef {
+            id: "sabrina".into(),
+            name: "Sabrina".into(),
+            title: "Neural Networks & Prompt Master".into(),
+            gym_city: "Saffron City".into(),
+            badge_id: "marsh".into(),
+            badge_name: "Marsh Badge".into(),
+            badge_icon: "🔮".into(),
+            signature_species_id: 65,
+            signature_name: "Alakazam".into(),
+            level: 70,
+            element_types: vec!["Psychic".into()],
+            unlock_req: "Win a 5-streak in the Battle Arena & earn Soul Badge".into(),
+            reward_bp: 200,
+            reward_coins: 1500,
+            quote_before: "I predicted your prompt before you typed the first token. Face true psychic computation!".into(),
+            quote_win: "Your neural resonance surpassed my foresight. The Marsh Badge is yours.".into(),
+        },
+        GymLeaderDef {
+            id: "blaine".into(),
+            name: "Blaine".into(),
+            title: "Hot-Reload & JIT Compilation".into(),
+            gym_city: "Cinnabar Island".into(),
+            badge_id: "volcano".into(),
+            badge_name: "Volcano Badge".into(),
+            badge_icon: "🔥".into(),
+            signature_species_id: 59,
+            signature_name: "Arcanine".into(),
+            level: 80,
+            element_types: vec!["Fire".into()],
+            unlock_req: "Burn 100,000,000 lifetime tokens & earn Marsh Badge".into(),
+            reward_bp: 250,
+            reward_coins: 2000,
+            quote_before: "Hah! You'd better have burn heal ready for this blazing turbo compiler!".into(),
+            quote_win: "Magnificent blaze! You extinguished my hottest challenge. Take the Volcano Badge!".into(),
+        },
+        GymLeaderDef {
+            id: "giovanni".into(),
+            name: "Giovanni".into(),
+            title: "AI Syndicate Grandmaster".into(),
+            gym_city: "Viridian City".into(),
+            badge_id: "earth".into(),
+            badge_name: "Earth Badge".into(),
+            badge_icon: "🌍".into(),
+            signature_species_id: 112,
+            signature_name: "Rhydon".into(),
+            level: 90,
+            element_types: vec!["Ground".into(), "Rock".into()],
+            unlock_req: "Unlock at least 5 Ribbons & earn Volcano Badge".into(),
+            reward_bp: 500,
+            reward_coins: 5000,
+            quote_before: "Welcome to my domain. I orchestrate entire clusters. Show me your ultimate model!".into(),
+            quote_win: "Formidable! You stand victorious at the pinnacle of AI Mastery. Bear the Earth Badge!".into(),
+        },
+    ]
+}
+
+pub fn find_gym_leader(leader_id: &str) -> Option<GymLeaderDef> {
+    get_gym_leaders().into_iter().find(|g| g.id.eq_ignore_ascii_case(leader_id))
+}
+
+pub fn build_gym_leader_fighter(leader: &GymLeaderDef) -> BattleFighter {
+    let types = if leader.element_types.is_empty() {
+        resolve_species_types(leader.signature_species_id)
+    } else {
+        leader.element_types.clone()
+    };
+    let moves = generate_moveset_for_types(&types);
+
+    // Scaling stats smoothly to level
+    let lvl_ratio = (leader.level as f32) / 50.0;
+    let base_hp = (110.0 * lvl_ratio).max(85.0) as u32;
+    let base_atk = (100.0 * lvl_ratio).max(75.0) as u32;
+    let base_def = (90.0 * lvl_ratio).max(70.0) as u32;
+    let base_spa = (100.0 * lvl_ratio).max(75.0) as u32;
+    let base_spd = (90.0 * lvl_ratio).max(70.0) as u32;
+    let base_spe = (95.0 * lvl_ratio).max(70.0) as u32;
+
+    BattleFighter {
+        species_id: leader.signature_species_id,
+        name: format!("{}'s {}", leader.name, leader.signature_name),
+        is_shiny: false,
+        level: leader.level,
+        stage: 3,
+        element_types: types,
+        max_hp: base_hp,
+        current_hp: base_hp,
+        attack: base_atk,
+        defense: base_def,
+        sp_attack: base_spa,
+        sp_defense: base_spd,
+        speed: base_spe,
+        ribbon_count: leader.level / 10,
+        is_overdrive: leader.level >= 80,
+        atk_stage: 0,
+        def_stage: 0,
+        moves,
+    }
 }
 
 /// Damage resolution output.

@@ -108,6 +108,16 @@ pub struct CompanionView {
     pub bp: u32,
     pub battle_stats: crate::domain::battle::BattleStatsRecord,
     pub active_battle: Option<crate::domain::battle::ActiveBattleState>,
+    pub gym_badges: Vec<String>,
+    pub gym_leaders: Vec<GymLeaderStatusView>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GymLeaderStatusView {
+    pub leader: crate::domain::battle::GymLeaderDef,
+    pub is_unlocked: bool,
+    pub is_defeated: bool,
 }
 
 #[derive(Serialize)]
@@ -323,6 +333,19 @@ fn build_snapshot(inner: &StateInner) -> Snapshot {
         bp: c.state.bp,
         battle_stats: c.state.battle_stats.clone(),
         active_battle: c.state.active_battle.clone(),
+        gym_badges: c.state.gym_badges.clone(),
+        gym_leaders: crate::domain::battle::get_gym_leaders()
+            .into_iter()
+            .map(|leader| {
+                let is_unlocked = c.is_gym_leader_unlocked(&leader.id);
+                let is_defeated = c.state.gym_badges.contains(&leader.badge_id);
+                GymLeaderStatusView {
+                    leader,
+                    is_unlocked,
+                    is_defeated,
+                }
+            })
+            .collect(),
     };
 
     let usage = UsageView {
@@ -600,6 +623,17 @@ pub fn start_battle(
 ) -> Result<Snapshot, String> {
     let mut inner = state.lock().map_err(|e| e.to_string())?;
     inner.companion.start_battle(species_id)?;
+    Ok(build_snapshot(&inner))
+}
+
+#[tauri::command]
+pub fn start_gym_battle(
+    state: State<'_, AppState>,
+    leader_id: String,
+    species_id: Option<i64>,
+) -> Result<Snapshot, String> {
+    let mut inner = state.lock().map_err(|e| e.to_string())?;
+    inner.companion.start_gym_battle(&leader_id, species_id)?;
     Ok(build_snapshot(&inner))
 }
 
