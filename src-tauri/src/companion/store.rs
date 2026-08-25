@@ -1935,38 +1935,260 @@ impl CompanionStore {
         }
     }
 
-    /// Egg purchaseable — an active mon to discard + wallet at/above the tier
-    /// price. Only sold tiers are enforceable (a legendary-only floor cannot be
-    /// expressed via capture_rate and would brick the egg forever).
+    /// Egg purchaseable — wallet at/above the tier price.
     pub fn can_buy_egg(&self, tier: Option<Rarity>) -> bool {
         if !FreshEgg::SHOP_TIERS.contains(&tier) {
             return false;
         }
-        self.has_active() && self.available_tokens() >= FreshEgg::price(tier)
+        self.available_tokens() >= FreshEgg::price(tier)
     }
 
-    /// Buys an egg — discards the current mon (not a graduation: dex /
-    /// collectedFinals untouched) and starts incubating a new egg from zero.
-    /// The species is NOT rolled here (it needs the network); only the guarantee
-    /// floor is recorded in state and consumed by the roll/hatch paths.
+    /// Buys an egg and places it in the user's Inventory/Bag as an item.
     pub fn buy_egg(&mut self, tier: Option<Rarity>) -> bool {
         if !self.can_buy_egg(tier) {
             return false;
         }
-        self.state.spent_tokens += FreshEgg::price(tier);
-        self.state.active = None; // discard — not graduation
+        let price = FreshEgg::price(tier);
+        self.state.spent_tokens += price;
+
+        let (key, name) = match tier {
+            None => ("egg_basic", "Pokémon Egg (Basic)"),
+            Some(Rarity::Uncommon) => ("egg_uncommon", "Pokémon Egg (Uncommon+)"),
+            Some(Rarity::Rare) => ("egg_rare", "Pokémon Egg (Rare+)"),
+            Some(Rarity::Legendary) => ("egg_legendary", "Pokémon Egg (Legendary)"),
+            _ => ("egg_basic", "Pokémon Egg (Basic)"),
+        };
+        *self.state.inventory.entry(key.to_string()).or_insert(0) += 1;
+
+        self.add_journal_entry(
+            "shop",
+            &format!("Purchased {}!", name),
+            &format!("Added 1× {} to your Bag. Ready to incubate anytime!", name),
+            "🥚",
+            None,
+            false,
+        );
+
+        self.save();
+        true
+    }
+
+    /// Places an egg from inventory into the incubator.
+    /// If an active companion or active egg is currently raised, it is safely stored in the PC Box.
+    pub fn incubate_egg(&mut self, tier_key: &str) -> bool {
+        let count = self.state.inventory.get(tier_key).copied().unwrap_or(0);
+        if count <= 0 {
+            return false;
+        }
+
+        let new_count = count - 1;
+        if new_count <= 0 {
+            self.state.inventory.remove(tier_key);
+        } else {
+            self.state.inventory.insert(tier_key.to_string(), new_count);
+        }
+
+        self.deposit_current_to_box();
+
+        let egg_tier = match tier_key {
+            "egg_uncommon" => Some(Rarity::Uncommon),
+            "egg_rare" => Some(Rarity::Rare),
+            "egg_epic" => Some(Rarity::Rare),
+            "egg_legendary" => Some(Rarity::Legendary),
+            _ => None,
+        };
+
+        self.state.active = None;
         self.active_generation += 1;
         self.current_line = None;
-        self.state.egg_usage = 0; // re-incubate from scratch
-        self.state.egg_tier = tier;
-        self.state.pending_hatch_id = None; // roll again under the new guarantee
+        self.state.egg_usage = 0;
+        self.state.egg_tier = egg_tier;
+        self.state.pending_hatch_id = None;
         self.prefetched_line_id = None;
         self.just_graduated = None;
         self.just_evolved_to = None;
         self.event_until = None;
-        self.ensure_egg_prefetch(); // warm up the next hatch
+        self.ensure_egg_prefetch();
+
+        self.add_journal_entry(
+            "buddy",
+            "Placed Pokémon Egg in Incubator! 🥚",
+            "A new egg has been placed in your incubator. Code and burn tokens to hatch it!",
+            "🐣",
+            None,
+            false,
+        );
+
         self.save();
         true
+    }
+
+    /// Safely stores the current active buddy (or egg) into `box_pokemon`.
+    pub fn deposit_current_to_box(&mut self) {
+        if let Some(active) = self.state.active.take() {
+            let species_id = self.current_species_id().unwrap_or(active.base_id);
+            let display_name = self.display_name();
+            let is_shiny = active.is_shiny;
+            let stage = active.stage_index + 1;
+            let total_stages = active.total_forms;
+            let progress = self.progress();
+            let ribbons = active.ribbons.clone();
+            let nature = active.nature;
+            let is_graduated = active.stage_index >= active.total_forms - 1;
+
+            let box_entry = crate::domain::companion::BoxCompanion {
+                id: Uuid::new_v4().to_string(),
+                species_id,
+                display_name,
+                is_shiny,
+                is_egg: false,
+                egg_tier: None,
+                egg_progress: 0.0,
+                stage,
+                total_stages,
+                progress,
+                ribbons,
+                nature,
+                is_graduated,
+                mon_state: Some(active),
+                egg_usage: None,
+                deposited_at: Utc::now(),
+            };
+            self.state.box_pokemon.push(box_entry);
+        } else if self.state.egg_usage > 0
+            || self.state.egg_tier.is_some()
+            || self.state.pending_hatch_id.is_some()
+        {
+            let egg_progress = self.egg_progress();
+            let box_entry = crate::domain::companion::BoxCompanion {
+                id: Uuid::new_v4().to_string(),
+                species_id: 0,
+                display_name: "Token Egg".to_string(),
+                is_shiny: false,
+                is_egg: true,
+                egg_tier: self.state.egg_tier,
+                egg_progress,
+                stage: 0,
+                total_stages: 1,
+                progress: egg_progress,
+                ribbons: Vec::new(),
+                nature: None,
+                is_graduated: false,
+                mon_state: None,
+                egg_usage: Some(self.state.egg_usage),
+                deposited_at: Utc::now(),
+            };
+            self.state.box_pokemon.push(box_entry);
+        }
+
+        self.state.active = None;
+        self.state.egg_usage = 0;
+        self.state.egg_tier = None;
+        self.state.pending_hatch_id = None;
+        self.current_line = None;
+    }
+
+    /// Switch active buddy to a Pokémon from the PC Box or Pokédex.
+    pub fn switch_active_buddy(&mut self, target_id: &str, source: &str) -> Result<(), String> {
+        match source {
+            "box" => {
+                let pos = self
+                    .state
+                    .box_pokemon
+                    .iter()
+                    .position(|b| b.id == target_id)
+                    .ok_or_else(|| "Companion not found in PC Box".to_string())?;
+
+                let target = self.state.box_pokemon.remove(pos);
+
+                // Deposit current companion/egg before activating target
+                self.deposit_current_to_box();
+
+                if target.is_egg {
+                    self.state.active = None;
+                    self.state.egg_usage = target.egg_usage.unwrap_or(0);
+                    self.state.egg_tier = target.egg_tier;
+                    self.ensure_egg_prefetch();
+                } else if let Some(mon_state) = target.mon_state {
+                    self.state.active = Some(mon_state);
+                    self.current_line = None;
+                    self.load_current_line();
+                }
+
+                self.add_journal_entry(
+                    "buddy",
+                    &format!("Withdrew {} from PC Box!", target.display_name),
+                    &format!("{} is now your active companion!", target.display_name),
+                    "🔄",
+                    Some(target.species_id),
+                    target.is_shiny,
+                );
+
+                self.save();
+                Ok(())
+            }
+            "dex" => {
+                let dex_id = target_id
+                    .parse::<i64>()
+                    .map_err(|_| "Invalid species ID".to_string())?;
+
+                let dex_entry = self
+                    .state
+                    .dex
+                    .iter()
+                    .find(|d| {
+                        d.chain_order.contains(&dex_id)
+                            || d.base_id == dex_id
+                            || d.final_id == dex_id
+                    })
+                    .cloned()
+                    .ok_or_else(|| format!("Species #{} not found in Pokédex", dex_id))?;
+
+                // Deposit current active before switching
+                self.deposit_current_to_box();
+
+                let max_stage_idx = (dex_entry.chain_order.len() as i64 - 1).max(0);
+                let target_stage_idx = dex_entry
+                    .chain_order
+                    .iter()
+                    .position(|&id| id == dex_id)
+                    .map(|idx| idx as i64)
+                    .unwrap_or(max_stage_idx);
+
+                let mut new_mon = MonState::new(
+                    dex_entry.base_id,
+                    dex_entry.chain_order.clone(),
+                    Some(dex_entry.chain_order.clone()),
+                    target_stage_idx,
+                    0,
+                    dex_entry.rarity,
+                    dex_entry.chain_order.len() as i64,
+                    dex_entry.is_shiny,
+                    dex_entry.nature,
+                    None,
+                    false,
+                );
+                new_mon.ribbons = dex_entry.ribbons.clone();
+
+                self.state.active = Some(new_mon);
+                self.current_line = None;
+                self.load_current_line();
+
+                let mon_name = self.display_name();
+                self.add_journal_entry(
+                    "buddy",
+                    &format!("Walking with {} from Pokédex!", mon_name),
+                    &format!("Set {} as your active companion partner!", mon_name),
+                    "🌟",
+                    Some(dex_id),
+                    dex_entry.is_shiny,
+                );
+
+                self.save();
+                Ok(())
+            }
+            _ => Err(format!("Unknown switch source: {}", source)),
+        }
     }
 
     pub fn can_buy_fresh_egg(&self) -> bool {
@@ -3031,7 +3253,7 @@ impl CompanionStore {
         }
     }
 
-    fn save(&self) {
+    pub fn save(&self) {
         let Ok(data) = serde_json::to_vec_pretty(&self.state) else {
             return;
         };
@@ -4119,7 +4341,7 @@ mod tests {
     }
 
     #[test]
-    fn buy_egg_discards_active_and_sets_guarantee() {
+    fn buy_egg_adds_to_inventory_and_incubate_moves_to_box() {
         let mut state = CompanionState::default();
         state.install_baseline_set = true;
         state.used_since_install = 20_000_000_000;
@@ -4148,37 +4370,45 @@ mod tests {
             None,
         )];
         let dex_ids: Vec<Uuid> = state.dex.iter().map(|e| e.id).collect();
-        let collected: HashSet<String> = state.collected_finals.clone();
 
         let mut s = StoreBuilder::new(Box::new(StubProvider::new(no_evo())))
             .seed_state(state)
             .rng(vec![0, 1])
             .build();
+
+        // 1. Buy Egg -> Added to Bag
         assert!(s.buy_egg(Some(Rarity::Rare)));
+        assert_eq!(s.state.inventory.get("egg_rare"), Some(&1));
+        assert!(
+            s.state.active.is_some(),
+            "active mon still active until incubation"
+        );
+
+        // 2. Incubate Egg -> Active mon moved to Box, new egg begins
+        assert!(s.incubate_egg("egg_rare"));
+        assert_eq!(s.state.inventory.get("egg_rare"), None);
         assert_eq!(s.state.egg_tier, Some(Rarity::Rare));
-        assert_eq!(s.state.spent_tokens, FreshEgg::price(Some(Rarity::Rare)));
         assert!(s.state.active.is_none());
-        assert_eq!(s.state.egg_usage, 0);
+        assert_eq!(s.state.box_pokemon.len(), 1);
+        assert_eq!(s.state.box_pokemon[0].species_id, 10);
+
+        // 3. Switch back to boxed mon
+        let box_id = s.state.box_pokemon[0].id.clone();
+        assert!(s.switch_active_buddy(&box_id, "box").is_ok());
+        assert!(s.state.active.is_some());
+        assert_eq!(s.state.active.as_ref().unwrap().base_id, 10);
+        assert_eq!(
+            s.state.box_pokemon.len(),
+            1,
+            "incubating egg was stored in box"
+        );
+        assert!(s.state.box_pokemon[0].is_egg);
+
         assert_eq!(
             s.state.dex.iter().map(|e| e.id).collect::<Vec<_>>(),
             dex_ids,
             "dex unchanged"
         );
-        assert_eq!(
-            s.state.collected_finals, collected,
-            "collectedFinals unchanged"
-        );
-    }
-
-    #[test]
-    fn cannot_buy_egg_while_incubating() {
-        let mut s = wallet_store(5_000_000_000, 0, &[]);
-        assert!(!s.has_active());
-        for tier in FreshEgg::SHOP_TIERS {
-            assert!(!s.can_buy_egg(tier));
-            assert!(!s.buy_egg(tier));
-        }
-        assert_eq!(s.state.spent_tokens, 0);
     }
 
     // MARK: ditto

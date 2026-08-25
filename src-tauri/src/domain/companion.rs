@@ -370,11 +370,7 @@ impl ShinyCharm {
 pub struct FreshEgg;
 
 impl FreshEgg {
-    /// Shop price. Premium reroll for an unwanted hatch (a sink for hoarded
-    /// tokens). A discarded individual is not a graduation — it just
-    /// disappears with no dex/probability (collectedFinals) impact, "as if
-    /// never rolled". The new egg re-incubates from zero (5M) and loses
-    /// growth (usedAtStage), which naturally suppresses spam/farming.
+    /// Shop price for base egg (1B tokens).
     pub const PRICE: i64 = 1_000_000_000;
 
     /// Eggs sold in the shop — no guarantee (base) → uncommon+ → rare+.
@@ -1088,6 +1084,35 @@ pub struct CompanionState {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_battle: Option<crate::domain::battle::ActiveBattleState>,
     pub gym_badges: Vec<String>,
+    // Pokémon PC Box / Party System
+    #[serde(default)]
+    pub box_pokemon: Vec<BoxCompanion>,
+}
+
+/// A companion deposited into the PC Box / Daycare to switch between active buddies.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoxCompanion {
+    pub id: String,
+    pub species_id: i64,
+    pub display_name: String,
+    pub is_shiny: bool,
+    pub is_egg: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub egg_tier: Option<Rarity>,
+    pub egg_progress: f64,
+    pub stage: i64,
+    pub total_stages: i64,
+    pub progress: f64,
+    pub ribbons: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nature: Option<PokemonNature>,
+    pub is_graduated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mon_state: Option<MonState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub egg_usage: Option<i64>,
+    pub deposited_at: DateTime<Utc>,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -1126,6 +1151,7 @@ impl Default for CompanionState {
             battle_stats: crate::domain::battle::BattleStatsRecord::default(),
             active_battle: None,
             gym_badges: Vec::new(),
+            box_pokemon: Vec::new(),
         }
     }
 }
@@ -1200,6 +1226,13 @@ impl<'de> Deserialize<'de> for CompanionState {
                 .collect(),
             _ => Vec::new(),
         };
+        let box_pokemon = match m.get("boxPokemon") {
+            Some(Value::Array(arr)) => arr
+                .iter()
+                .filter_map(|item| BoxCompanion::deserialize(item).ok())
+                .collect(),
+            _ => Vec::new(),
+        };
 
         Ok(Self {
             install_baseline_set: get_bool(m, "installBaselineSet"),
@@ -1226,6 +1259,7 @@ impl<'de> Deserialize<'de> for CompanionState {
             battle_stats,
             active_battle,
             gym_badges,
+            box_pokemon,
         })
     }
 }

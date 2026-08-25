@@ -110,6 +110,7 @@ pub struct CompanionView {
     pub active_battle: Option<crate::domain::battle::ActiveBattleState>,
     pub gym_badges: Vec<String>,
     pub gym_leaders: Vec<GymLeaderStatusView>,
+    pub box_pokemon: Vec<crate::domain::companion::BoxCompanion>,
 }
 
 #[derive(Serialize)]
@@ -282,11 +283,17 @@ fn build_snapshot(inner: &StateInner) -> Snapshot {
         })
         .collect();
 
-    let owned_items: Vec<(String, i64)> = c
-        .owned_items()
-        .into_iter()
-        .map(|(kind, count)| (kind.raw_value().to_string(), count))
-        .collect();
+    let owned_items: Vec<(String, i64)> = {
+        let mut items: Vec<(String, i64)> = c
+            .state
+            .inventory
+            .iter()
+            .filter(|(_, &count)| count > 0)
+            .map(|(k, &v)| (k.clone(), v))
+            .collect();
+        items.sort_by(|a, b| a.0.cmp(&b.0));
+        items
+    };
 
     let companion = CompanionView {
         state: c.state.clone(),
@@ -346,6 +353,7 @@ fn build_snapshot(inner: &StateInner) -> Snapshot {
                 }
             })
             .collect(),
+        box_pokemon: c.state.box_pokemon.clone(),
     };
 
     let usage = UsageView {
@@ -557,6 +565,52 @@ pub async fn buy_egg(state: State<'_, AppState>, tier: Option<String>) -> Result
         let mut inner = state.lock().map_err(|e| e.to_string())?;
         let tier = tier.and_then(|t| parse_rarity(&t));
         inner.companion.buy_egg(tier);
+        Ok(build_snapshot(&inner))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn incubate_egg(
+    state: State<'_, AppState>,
+    tier_key: String,
+) -> Result<Snapshot, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut inner = state.lock().map_err(|e| e.to_string())?;
+        if !inner.companion.incubate_egg(&tier_key) {
+            return Err("Egg not found in inventory".to_string());
+        }
+        Ok(build_snapshot(&inner))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn switch_active_buddy(
+    state: State<'_, AppState>,
+    target_id: String,
+    source: String,
+) -> Result<Snapshot, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut inner = state.lock().map_err(|e| e.to_string())?;
+        inner.companion.switch_active_buddy(&target_id, &source)?;
+        Ok(build_snapshot(&inner))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn deposit_active_to_box(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut inner = state.lock().map_err(|e| e.to_string())?;
+        inner.companion.deposit_current_to_box();
+        inner.companion.save();
         Ok(build_snapshot(&inner))
     })
     .await

@@ -70,6 +70,9 @@ pub fn run() {
             integration::app::get_sprite,
             integration::app::get_pokedex_details,
             integration::app::check_for_updates,
+            integration::app::incubate_egg,
+            integration::app::switch_active_buddy,
+            integration::app::deposit_active_to_box,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

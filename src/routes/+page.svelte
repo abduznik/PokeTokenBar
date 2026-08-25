@@ -45,6 +45,23 @@
     isShiny?: boolean;
   }
 
+  interface BoxCompanion {
+    id: string;
+    speciesId: number;
+    displayName: string;
+    isShiny: boolean;
+    isEgg: boolean;
+    eggTier?: string | null;
+    eggProgress: number;
+    stage: number;
+    totalStages: number;
+    progress: number;
+    ribbons: string[];
+    nature?: string | null;
+    isGraduated: boolean;
+    depositedAt: string;
+  }
+
   interface CompanionView {
     displayState: string;
     displayName: string;
@@ -81,6 +98,7 @@
     activeBattle?: ActiveBattleState | null;
     gymBadges?: string[];
     gymLeaders?: GymLeaderStatusView[];
+    boxPokemon?: BoxCompanion[];
     state?: {
       usedSinceInstall?: number;
     };
@@ -611,6 +629,47 @@
     }
   }
 
+  // 🎒 Shop & Bag sub-modes and filters
+  let shopSubMode = $state<"bag" | "store">("bag");
+  let bagFilter = $state<"all" | "berries" | "candies" | "eggs" | "charms">("all");
+
+  // 📦 Pokédex & PC Box sub-modes
+  let pokedexSubMode = $state<"dex" | "box">("dex");
+  let isSwitchingBuddy = $state(false);
+  let showQuickBagDrawer = $state(false);
+
+  async function incubateEgg(tierKey: string) {
+    try {
+      snap = await invoke<Snapshot>("incubate_egg", { tierKey });
+      currentTab = "buddy";
+      showQuickBagDrawer = false;
+    } catch (e) {
+      console.error("Failed to incubate egg:", e);
+    }
+  }
+
+  async function switchActiveBuddy(targetId: string, source: "box" | "dex") {
+    if (isSwitchingBuddy) return;
+    isSwitchingBuddy = true;
+    try {
+      snap = await invoke<Snapshot>("switch_active_buddy", { targetId, source });
+      selectedDexMon = null;
+      currentTab = "buddy";
+    } catch (e) {
+      console.error("Failed to switch buddy:", e);
+    } finally {
+      isSwitchingBuddy = false;
+    }
+  }
+
+  async function depositActiveToBox() {
+    try {
+      snap = await invoke<Snapshot>("deposit_active_to_box");
+    } catch (e) {
+      console.error("Failed to deposit active buddy to box:", e);
+    }
+  }
+
   async function buy(kind: string, price: number, canBuy: boolean) {
     if (!canBuy || (snap && snap.companion.availableTokens < price)) {
       triggerShake(kind);
@@ -1078,7 +1137,21 @@
       desc: "Premium egg with high odds for Rare, Legendary & Mythical Pokémon.",
       tileBg: "rgba(91,140,255,0.10)",
       tileBorder: "1.5px solid rgba(91,140,255,0.45)",
-      iconColor: "#E8B84B",
+      iconColor: "#5B8CFF",
+    },
+    egg_epic: {
+      name: "Pokémon Egg (Epic)",
+      desc: "Guaranteed Stage 3 powerhouse evolution partner.",
+      tileBg: "rgba(168,85,247,0.12)",
+      tileBorder: "1.5px solid rgba(168,85,247,0.45)",
+      iconColor: "#C084FC",
+    },
+    egg_legendary: {
+      name: "Legendary Egg (Mythical/Legendary)",
+      desc: "Sacred egg hatching legendary & mythical Pokémon deities.",
+      tileBg: "rgba(234,179,8,0.15)",
+      tileBorder: "1.5px solid rgba(234,179,8,0.5)",
+      iconColor: "#FACC15",
     },
     shinyCharm: {
       name: "Shiny Charm",
@@ -1640,7 +1713,16 @@
             </div>
 
             <div class="quick-items-section">
-              <span class="section-tag">QUICK ITEMS & BERRIES</span>
+              <div class="quick-items-header-row">
+                <span class="section-tag">QUICK ITEMS & BERRIES</span>
+                <button
+                  type="button"
+                  class="quick-open-bag-link"
+                  onclick={() => { currentTab = "shop"; shopSubMode = "bag"; }}
+                >
+                  🎒 Open Bag ➔
+                </button>
+              </div>
               <div class="quick-grid">
                 <button
                   class="quick-btn berry-btn"
@@ -1772,211 +1854,434 @@
 
         {#if currentTab === "shop"}
           {@const isOverdriveActive = Boolean(c.isMegaOverdrive || (megaOverdriveSetting && (u.burnTier === "fast" || u.burnTier === "blazing")))}
+          {@const totalItems = c.ownedItems.reduce((a, [_, n]) => a + n, 0)}
           <div class="tab-pane">
-            {#if isOverdriveActive}
-              <div class="coin-rush-banner-top">
-                <span class="rush-icon">⚡</span>
-                <div class="rush-text-col">
-                  <span class="rush-title">2× COIN RUSH ACTIVE</span>
-                  <span class="rush-sub">Mega Overdrive Multiplier (Fast/Blazing Sprint)</span>
-                </div>
-              </div>
-            {/if}
 
-            <div class="wallet-card" class:overdrive-wallet={isOverdriveActive}>
-              <svg width="120" height="120" viewBox="0 0 24 24" class="wallet-watermark">
-                <circle cx="12" cy="12" r="9.5" fill="none" stroke="#fff" stroke-width="1.4"></circle>
-                <path d="M2.5 12h19" stroke="#fff" stroke-width="1.4"></path>
-                <circle cx="12" cy="12" r="3" fill="none" stroke="#fff" stroke-width="1.4"></circle>
-              </svg>
-              <div class="wallet-content">
-                <svg width="30" height="30" viewBox="0 0 24 24" class="wallet-coin">
-                  <circle cx="12" cy="12" r="9.2" fill="#E8B84B" stroke="#9C6B1F" stroke-width="1.1"></circle>
-                  <circle cx="12" cy="12" r="5.6" fill="none" stroke="#9C6B1F" stroke-width="1" opacity=".55"></circle>
-                  <ellipse cx="9" cy="8.3" rx="2.3" ry="1.3" fill="#fff" opacity=".3"></ellipse>
-                </svg>
-                <div class="wallet-text">
-                  <span class="wallet-amount">{tokens(c.availableTokens)}</span>
-                  <span class="wallet-label">TOKENS AVAILABLE TO SPEND</span>
-                </div>
-              </div>
+            <!-- Segmented Shop Submode Selector -->
+            <div class="shop-mode-toggle-bar">
+              <button
+                type="button"
+                class="shop-mode-btn"
+                class:active={shopSubMode === "bag"}
+                onclick={() => (shopSubMode = "bag")}
+              >
+                <span class="mode-icon">🎒</span>
+                <span>Trainer Bag</span>
+                {#if totalItems > 0}
+                  <span class="bag-pill-count">{totalItems}</span>
+                {/if}
+              </button>
+              <button
+                type="button"
+                class="shop-mode-btn"
+                class:active={shopSubMode === "store"}
+                onclick={() => (shopSubMode = "store")}
+              >
+                <span class="mode-icon">🛒</span>
+                <span>PokéMart Store</span>
+              </button>
             </div>
 
-            <div class="panel-card">
-              <div class="bag-header">
-                <span class="panel-title">My Bag</span>
-                {#if c.ownedItems.length > 0}
-                  <span class="bag-count-badge">{c.ownedItems.reduce((a, [_, n]) => a + n, 0)} items</span>
+            {#if shopSubMode === "bag"}
+              {@const filteredItems = c.ownedItems.filter(([k]) => {
+                if (bagFilter === "berries") return k === "oranBerry" || k === "sitrusBerry";
+                if (bagFilter === "candies") return k === "rareCandy" || k === "mint";
+                if (bagFilter === "eggs") return k.startsWith("egg");
+                if (bagFilter === "charms") return k === "shinyCharm";
+                return true;
+              })}
+              <!-- 🎒 Full Trainer Bag View -->
+              <div class="panel-card bag-full-card">
+                <div class="bag-header-full">
+                  <div class="bag-header-left">
+                    <span class="panel-title">Trainer Inventory</span>
+                    <span class="bag-header-sub">Manage food, items, candies and eggs</span>
+                  </div>
+                  <button
+                    type="button"
+                    class="visit-store-btn"
+                    onclick={() => (shopSubMode = "store")}
+                  >
+                    🛒 Buy More ➔
+                  </button>
+                </div>
+
+                <!-- Bag Category Filter Pills -->
+                <div class="bag-filter-bar">
+                  {#each [
+                    ["all", "All", "🎒"],
+                    ["berries", "Berries", "🫐"],
+                    ["candies", "Candies & Mints", "🍬"],
+                    ["eggs", "Eggs", "🥚"],
+                    ["charms", "Special", "✨"],
+                  ] as [catKey, catLabel, catIcon]}
+                    <button
+                      type="button"
+                      class="bag-filter-btn"
+                      class:active={bagFilter === catKey}
+                      onclick={() => (bagFilter = catKey as typeof bagFilter)}
+                    >
+                      <span>{catIcon}</span>
+                      <span>{catLabel}</span>
+                    </button>
+                  {/each}
+                </div>
+
+                {#if filteredItems.length > 0}
+                  <div class="bag-items-grid">
+                    {#each filteredItems as [kind, count]}
+                      {@const disp = itemDisplay[kind] ?? { name: kind, desc: "A training item.", tileBg: "rgba(255,255,255,0.05)", tileBorder: "1px solid rgba(255,255,255,0.1)", iconColor: "#E8B84B" }}
+                      <div class="bag-item-card">
+                        <div class="bic-top">
+                          <div class="item-tile" style="background: {disp.tileBg}; border: {disp.tileBorder};">
+                            {#if kind === "oranBerry"}
+                              <span class="item-tile-emoji">🫐</span>
+                            {:else if kind === "sitrusBerry"}
+                              <span class="item-tile-emoji">🍊</span>
+                            {:else if kind === "mint"}
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill={disp.iconColor}><path d="M20 4C11 4 4 10 4 17c0 1.5 1 2.5 2.2 2.8C7 13 12 8 20 4Z"></path></svg>
+                            {:else if kind === "rareCandy"}
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill={disp.iconColor}><path d="M9 9 4 6v12l5-3Z"></path><path d="M15 9l5-3v12l-5-3Z"></path><rect x="9" y="9" width="6" height="6" rx="1.5"></rect></svg>
+                            {:else if kind.startsWith("egg")}
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill={disp.iconColor}><path d="M12 2C7.5 8.5 5 13 5 16.5A7 7 0 0 0 19 16.5C19 13 16.5 8.5 12 2Z"></path></svg>
+                            {:else}
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill={disp.iconColor}><path d="M12 2.5c.3 3.2 1 5.6 2.1 7.1 1.5 1.1 3.9 1.8 7.1 2.1-3.2.3-5.6 1-7.1 2.1-1.1 1.5-1.8 3.9-2.1 7.1-.3-3.2-1-5.6-2.1-7.1-1.5-1.1-3.9-1.8-7.1-2.1 3.2-.3 5.6-1 7.1-2.1 1.1-1.5 1.8-3.9 2.1-7.1Z"></path></svg>
+                            {/if}
+                          </div>
+                          <div class="bic-badge-box">
+                            <span class="bic-qty">×{count}</span>
+                          </div>
+                        </div>
+
+                        <div class="bic-info">
+                          <span class="bic-name">{disp.name}</span>
+                          <span class="bic-desc">{disp.desc}</span>
+                        </div>
+
+                        <div class="bic-actions">
+                          {#if kind === "oranBerry"}
+                            <button
+                              class="bag-action-btn feed-btn"
+                              disabled={!c.hasActive || c.isEgg}
+                              onclick={() => useBerry(kind)}
+                            >
+                              🫐 Feed Partner
+                            </button>
+                          {:else if kind === "sitrusBerry"}
+                            <button
+                              class="bag-action-btn feed-btn gold"
+                              disabled={!c.hasActive || c.isEgg}
+                              onclick={() => useBerry(kind)}
+                            >
+                              🍊 Feed Golden
+                            </button>
+                          {:else if kind === "rareCandy"}
+                            <button
+                              class="bag-action-btn candy-btn"
+                              disabled={!c.hasActive || c.isEgg}
+                              onclick={useCandy}
+                            >
+                              🍬 Level Up
+                            </button>
+                          {:else if kind === "mint"}
+                            <button
+                              class="bag-action-btn mint-btn"
+                              disabled={!c.hasActive || c.isEgg}
+                              onclick={useMint}
+                            >
+                              🌿 Reroll Nature
+                            </button>
+                          {:else if kind.startsWith("egg")}
+                            <button
+                              class="bag-action-btn egg-btn"
+                              onclick={() => incubateEgg(kind)}
+                            >
+                              🥚 Incubate Egg
+                            </button>
+                          {:else if kind === "shinyCharm"}
+                            <span class="bic-active-pill">✨ Active Passive</span>
+                          {/if}
+                        </div>
+                      </div>
+                    {/each}
+                  </div>
+                {:else}
+                  <div class="empty-bag-state">
+                    <div class="empty-bag-icon">🎒</div>
+                    <span class="empty-bag-text">
+                      {bagFilter === "all" ? "Your trainer bag is currently empty." : `No ${bagFilter} in your bag.`}
+                    </span>
+                    <button
+                      type="button"
+                      class="empty-visit-btn"
+                      onclick={() => (shopSubMode = "store")}
+                    >
+                      Visit PokéMart Store ➔
+                    </button>
+                  </div>
                 {/if}
               </div>
-              {#if c.ownedItems.length > 0}
-                <div class="bag-list">
-                  {#each c.ownedItems as [kind, count]}
-                    {@const disp = itemDisplay[kind] ?? { name: kind, desc: "A training item.", tileBg: "rgba(255,255,255,0.05)", tileBorder: "1px solid rgba(255,255,255,0.1)", iconColor: "#E8B84B" }}
-                    <div class="bag-item-row">
+
+            {:else}
+              <!-- 🛒 PokéMart Store View -->
+              {#if isOverdriveActive}
+                <div class="coin-rush-banner-top">
+                  <span class="rush-icon">⚡</span>
+                  <div class="rush-text-col">
+                    <span class="rush-title">2× COIN RUSH ACTIVE</span>
+                    <span class="rush-sub">Mega Overdrive Multiplier (Fast/Blazing Sprint)</span>
+                  </div>
+                </div>
+              {/if}
+
+              <div class="wallet-card" class:overdrive-wallet={isOverdriveActive}>
+                <svg width="120" height="120" viewBox="0 0 24 24" class="wallet-watermark">
+                  <circle cx="12" cy="12" r="9.5" fill="none" stroke="#fff" stroke-width="1.4"></circle>
+                  <path d="M2.5 12h19" stroke="#fff" stroke-width="1.4"></path>
+                  <circle cx="12" cy="12" r="3" fill="none" stroke="#fff" stroke-width="1.4"></circle>
+                </svg>
+                <div class="wallet-content">
+                  <svg width="30" height="30" viewBox="0 0 24 24" class="wallet-coin">
+                    <circle cx="12" cy="12" r="9.2" fill="#E8B84B" stroke="#9C6B1F" stroke-width="1.1"></circle>
+                    <circle cx="12" cy="12" r="5.6" fill="none" stroke="#9C6B1F" stroke-width="1" opacity=".55"></circle>
+                    <ellipse cx="9" cy="8.3" rx="2.3" ry="1.3" fill="#fff" opacity=".3"></ellipse>
+                  </svg>
+                  <div class="wallet-text">
+                    <span class="wallet-amount">{tokens(c.availableTokens)}</span>
+                    <span class="wallet-label">TOKENS AVAILABLE TO SPEND</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="panel-card">
+                <div class="shop-header">
+                  <div class="shop-title-col">
+                    <span class="panel-title">PokéMart Catalogue</span>
+                    <span class="shop-sub">Spend tokens to purchase items & eggs for your Bag</span>
+                  </div>
+                </div>
+                <div class="shop-items-list">
+                  {#each c.shop as item (item.kind + (item.tier ?? ""))}
+                    {@const itemKey = item.kind === "egg" ? `egg_${item.tier ?? "basic"}` : item.kind}
+                    {@const disp = itemDisplay[itemKey] ?? { name: item.kind, desc: "A training item.", tileBg: "rgba(255,255,255,0.05)", tileBorder: "1px solid rgba(255,255,255,0.1)", iconColor: "#E8B84B" }}
+                    {@const ownedCount = c.ownedItems.find(([k]) => k === itemKey)?.[1] ?? 0}
+                    <div class="shop-item-row">
                       <div class="item-tile" style="background: {disp.tileBg}; border: {disp.tileBorder};">
-                        {#if kind === "oranBerry"}
+                        {#if item.kind === "oranBerry"}
                           <span class="item-tile-emoji">🫐</span>
-                        {:else if kind === "sitrusBerry"}
+                        {:else if item.kind === "sitrusBerry"}
                           <span class="item-tile-emoji">🍊</span>
-                        {:else if kind === "mint"}
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill={disp.iconColor}><path d="M20 4C11 4 4 10 4 17c0 1.5 1 2.5 2.2 2.8C7 13 12 8 20 4Z"></path></svg>
-                        {:else if kind === "rareCandy"}
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill={disp.iconColor}><path d="M9 9 4 6v12l5-3Z"></path><path d="M15 9l5-3v12l-5-3Z"></path><rect x="9" y="9" width="6" height="6" rx="1.5"></rect></svg>
-                        {:else if kind.startsWith("egg")}
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill={disp.iconColor}><path d="M12 2C7.5 8.5 5 13 5 16.5A7 7 0 0 0 19 16.5C19 13 16.5 8.5 12 2Z"></path></svg>
+                        {:else if item.kind === "mint"}
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill={disp.iconColor}><path d="M20 4C11 4 4 10 4 17c0 1.5 1 2.5 2.2 2.8C7 13 12 8 20 4Z"></path></svg>
+                        {:else if item.kind === "rareCandy"}
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill={disp.iconColor}><path d="M9 9 4 6v12l5-3Z"></path><path d="M15 9l5-3v12l-5-3Z"></path><rect x="9" y="9" width="6" height="6" rx="1.5"></rect></svg>
+                        {:else if item.kind === "egg"}
+                          <svg width="17" height="17" viewBox="0 0 24 24" fill={disp.iconColor}><path d="M12 2C7.5 8.5 5 13 5 16.5A7 7 0 0 0 19 16.5C19 13 16.5 8.5 12 2Z"></path></svg>
                         {:else}
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill={disp.iconColor}><path d="M12 2.5c.3 3.2 1 5.6 2.1 7.1 1.5 1.1 3.9 1.8 7.1 2.1-3.2.3-5.6 1-7.1 2.1-1.1 1.5-1.8 3.9-2.1 7.1-.3-3.2-1-5.6-2.1-7.1-1.5-1.1-3.9-1.8-7.1-2.1 3.2-.3 5.6-1 7.1-2.1 1.1-1.5 1.8-3.9 2.1-7.1Z"></path></svg>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill={disp.iconColor}><path d="M12 2.5c.3 3.2 1 5.6 2.1 7.1 1.5 1.1 3.9 1.8 7.1 2.1-3.2.3-5.6 1-7.1 2.1-1.1 1.5-1.8 3.9-2.1 7.1-.3-3.2-1-5.6-2.1-7.1-1.5-1.1-3.9-1.8-7.1-2.1 3.2-.3 5.6-1 7.1-2.1 1.1-1.5 1.8-3.9 2.1-7.1Z"></path></svg>
                         {/if}
                       </div>
-                      <div class="bag-item-info">
-                        <div class="bag-item-top">
-                          <span class="bag-item-name">{disp.name}</span>
-                          <span class="bag-item-qty">×{count}</span>
+                      <div class="shop-item-info">
+                        <div class="shop-item-name-row">
+                          <span class="shop-item-name">{disp.name}</span>
+                          {#if ownedCount > 0}
+                            <span class="shop-owned-tag">Owned: {ownedCount}</span>
+                          {/if}
                         </div>
                         <span class="item-desc-text">{disp.desc}</span>
+                        <div class="shop-price-row">
+                          <svg width="11" height="11" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.2" fill="#E8B84B" stroke="#9C6B1F" stroke-width="1.3"></circle></svg>
+                          <span class="shop-price-val">{tokens(item.price)}</span>
+                          <span class="shop-price-unit">tokens</span>
+                        </div>
                       </div>
-                      <div class="bag-item-action">
-                        {#if kind === "oranBerry" || kind === "sitrusBerry"}
-                          <button
-                            class="bag-use-btn berry-feed-btn"
-                            disabled={!c.hasActive || c.isEgg}
-                            onclick={() => useBerry(kind)}
-                          >
-                            Feed
-                          </button>
-                        {:else if kind === "rareCandy"}
-                          <button
-                            class="bag-use-btn"
-                            disabled={!c.hasActive || c.isEgg}
-                            onclick={useCandy}
-                          >
-                            Use
-                          </button>
-                        {:else if kind === "mint"}
-                          <button
-                            class="bag-use-btn"
-                            disabled={!c.hasActive || c.isEgg}
-                            onclick={useMint}
-                          >
-                            Use
-                          </button>
-                        {:else if kind === "shinyCharm"}
-                          <span class="bag-held-badge">Active ✨</span>
-                        {/if}
-                      </div>
+                      <button
+                        class="buy-action-btn"
+                        class:pk-shake={shakeItemId === itemKey}
+                        onclick={() => (item.kind === "egg" ? buyEgg(item.tier, item.price, item.canBuy) : buy(item.kind, item.price, item.canBuy))}
+                      >
+                        Buy +1
+                      </button>
                     </div>
                   {/each}
                 </div>
-              {:else}
-                <div class="empty-bag-state">
-                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#3C4152" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 9V7a3 3 0 0 1 6 0v2"></path><rect x="4.5" y="9" width="15" height="11.5" rx="2.2"></rect></svg>
-                  <span class="empty-bag-text">Your bag is empty. Buy items below!</span>
-                </div>
-              {/if}
-            </div>
-
-            <div class="panel-card">
-              <div class="shop-header">
-                <span class="panel-title">PokéShop</span>
-                <span class="shop-sub">Spend tokens to grow your buddy</span>
               </div>
-              <div class="shop-items-list">
-                {#each c.shop as item (item.kind + (item.tier ?? ""))}
-                  {@const itemKey = item.kind === "egg" ? `egg_${item.tier ?? "basic"}` : item.kind}
-                  {@const disp = itemDisplay[itemKey] ?? { name: item.kind, desc: "A training item.", tileBg: "rgba(255,255,255,0.05)", tileBorder: "1px solid rgba(255,255,255,0.1)", iconColor: "#E8B84B" }}
-                  <div class="shop-item-row">
-                    <div class="item-tile" style="background: {disp.tileBg}; border: {disp.tileBorder};">
-                      {#if item.kind === "oranBerry"}
-                        <span class="item-tile-emoji">🫐</span>
-                      {:else if item.kind === "sitrusBerry"}
-                        <span class="item-tile-emoji">🍊</span>
-                      {:else if item.kind === "mint"}
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill={disp.iconColor}><path d="M20 4C11 4 4 10 4 17c0 1.5 1 2.5 2.2 2.8C7 13 12 8 20 4Z"></path></svg>
-                      {:else if item.kind === "rareCandy"}
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill={disp.iconColor}><path d="M9 9 4 6v12l5-3Z"></path><path d="M15 9l5-3v12l-5-3Z"></path><rect x="9" y="9" width="6" height="6" rx="1.5"></rect></svg>
-                      {:else if item.kind === "egg"}
-                        <svg width="17" height="17" viewBox="0 0 24 24" fill={disp.iconColor}><path d="M12 2C7.5 8.5 5 13 5 16.5A7 7 0 0 0 19 16.5C19 13 16.5 8.5 12 2Z"></path></svg>
-                      {:else}
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill={disp.iconColor}><path d="M12 2.5c.3 3.2 1 5.6 2.1 7.1 1.5 1.1 3.9 1.8 7.1 2.1-3.2.3-5.6 1-7.1 2.1-1.1 1.5-1.8 3.9-2.1 7.1-.3-3.2-1-5.6-2.1-7.1-1.5-1.1-3.9-1.8-7.1-2.1 3.2-.3 5.6-1 7.1-2.1 1.1-1.5 1.8-3.9 2.1-7.1Z"></path></svg>
-                      {/if}
-                    </div>
-                    <div class="shop-item-info">
-                      <span class="shop-item-name">{disp.name}</span>
-                      <span class="item-desc-text">{disp.desc}</span>
-                      <div class="shop-price-row">
-                        <svg width="11" height="11" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.2" fill="#E8B84B" stroke="#9C6B1F" stroke-width="1.3"></circle></svg>
-                        <span class="shop-price-val">{tokens(item.price)}</span>
-                        <span class="shop-price-unit">tokens</span>
-                      </div>
-                    </div>
-                    <button
-                      class="buy-action-btn"
-                      class:pk-shake={shakeItemId === itemKey}
-                      onclick={() => (item.kind === "egg" ? buyEgg(item.tier, item.price, item.canBuy) : buy(item.kind, item.price, item.canBuy))}
-                    >
-                      Buy
-                    </button>
-                  </div>
-                {/each}
-              </div>
-            </div>
+            {/if}
           </div>
         {/if}
 
         {#if currentTab === "pokedex"}
+          {@const boxList = c.boxPokemon ?? []}
           <div class="tab-pane">
-            <div class="pokedex-header-row">
-              <span class="panel-title">Discovered Pokémon</span>
-              <span class="dex-counter">{c.dex.length} Collected</span>
+            <div class="pokedex-mode-toggle-bar">
+              <button
+                type="button"
+                class="pokedex-mode-btn"
+                class:active={pokedexSubMode === "dex"}
+                onclick={() => (pokedexSubMode = "dex")}
+              >
+                <span class="mode-icon">📖</span>
+                <span>Pokédex Registry</span>
+                <span class="pokedex-count-badge">{c.dex.length}</span>
+              </button>
+              <button
+                type="button"
+                class="pokedex-mode-btn"
+                class:active={pokedexSubMode === "box"}
+                onclick={() => (pokedexSubMode = "box")}
+              >
+                <span class="mode-icon">📦</span>
+                <span>PC Box & Party</span>
+                <span class="pokedex-count-badge">{boxList.length}</span>
+              </button>
             </div>
-            <div class="pokedex-2col-grid">
-              {#each c.dex as d (d.id)}
-                {@const typeInfo = getTypes(d.id)}
-                <button
-                  class="pokedex-card clickable-card"
-                  onclick={() => openDexDetails(d)}
-                  type="button"
-                  title="Click to view Pokédex entry for {d.name}"
-                >
-                  <div class="card-top-stripe" style="background: {typeInfo.primary.text};"></div>
-                  {#if d.isRaising}
-                    <span class="active-tag">ACTIVE</span>
-                  {/if}
-                  <div class="dex-sprite-container">
-                    <img
-                      class="dex-sprite-img"
-                      src={spriteUrl(d.id, d.isShiny, true)}
-                      alt={d.name}
-                      onerror={(e) => fallbackStaticSprite(e, d.id, d.isShiny)}
-                      loading="lazy"
-                    />
+
+            {#if pokedexSubMode === "dex"}
+              <div class="pokedex-header-row">
+                <span class="panel-title">Discovered Pokémon</span>
+                <span class="dex-counter">{c.dex.length} Collected</span>
+              </div>
+              <div class="pokedex-2col-grid">
+                {#each c.dex as d (d.id)}
+                  {@const typeInfo = getTypes(d.id)}
+                  <button
+                    class="pokedex-card clickable-card"
+                    onclick={() => openDexDetails(d)}
+                    type="button"
+                    title="Click to view Pokédex entry for {d.name}"
+                  >
+                    <div class="card-top-stripe" style="background: {typeInfo.primary.text};"></div>
+                    {#if d.isRaising}
+                      <span class="active-tag">ACTIVE</span>
+                    {/if}
+                    <div class="dex-sprite-container">
+                      <img
+                        class="dex-sprite-img"
+                        src={spriteUrl(d.id, d.isShiny, true)}
+                        alt={d.name}
+                        onerror={(e) => fallbackStaticSprite(e, d.id, d.isShiny)}
+                        loading="lazy"
+                      />
+                    </div>
+                    <span class="dex-species-name">
+                      {d.name}
+                      {#if d.isShiny}<span class="shiny-star">✨</span>{/if}
+                    </span>
+                    <div class="dex-types-list">
+                      {#each typeInfo.list as t}
+                        <span class="dex-type-pill" style="background: {t.bg}; border: {t.border}; color: {t.text};">
+                          {t.name}
+                        </span>
+                      {/each}
+                    </div>
+                    <div class="dex-view-hint">
+                      <span>View Entry ➔</span>
+                    </div>
+                  </button>
+                {/each}
+                {#each Array(Math.max(4, 8 - c.dex.length)) as _, i}
+                  <div class="locked-slot-card">
+                    <div class="locked-silhouette-box">
+                      <span class="locked-question">?</span>
+                    </div>
+                    <span class="locked-label">???</span>
                   </div>
-                  <span class="dex-species-name">
-                    {d.name}
-                    {#if d.isShiny}<span class="shiny-star">✨</span>{/if}
-                  </span>
-                  <div class="dex-types-list">
-                    {#each typeInfo.list as t}
-                      <span class="dex-type-pill" style="background: {t.bg}; border: {t.border}; color: {t.text};">
-                        {t.name}
-                      </span>
-                    {/each}
-                  </div>
-                  <div class="dex-view-hint">
-                    <span>View Entry ➔</span>
-                  </div>
-                </button>
-              {/each}
-              {#each Array(Math.max(4, 8 - c.dex.length)) as _, i}
-                <div class="locked-slot-card">
-                  <div class="locked-silhouette-box">
-                    <span class="locked-question">?</span>
-                  </div>
-                  <span class="locked-label">???</span>
+                {/each}
+              </div>
+            {:else}
+              <!-- 📦 PC Box & Daycare View -->
+              <div class="pc-box-header-row">
+                <div class="pc-box-title-box">
+                  <span class="panel-title">Bill’s Pokémon PC Box</span>
+                  <span class="pc-box-sub">Switch between companions in training or stored eggs</span>
                 </div>
-              {/each}
-            </div>
+                {#if c.hasActive || c.isEgg}
+                  <button
+                    type="button"
+                    class="deposit-active-btn"
+                    onclick={depositActiveToBox}
+                    title="Safely deposit current active buddy or egg into PC Box"
+                  >
+                    📥 Deposit Active
+                  </button>
+                {/if}
+              </div>
+
+              {#if boxList.length > 0}
+                <div class="pc-box-grid">
+                  {#each boxList as boxMon (boxMon.id)}
+                    <div class="pc-box-card" class:is-egg-card={boxMon.isEgg}>
+                      <div class="pc-card-header">
+                        {#if boxMon.isEgg}
+                          <span class="pc-type-tag egg-tag">🥚 Egg</span>
+                          <span class="pc-stat-badge">{(boxMon.eggProgress * 100).toFixed(0)}%</span>
+                        {:else}
+                          <span class="pc-type-tag" class:grad-tag={boxMon.isGraduated}>
+                            {boxMon.isGraduated ? "🎓 Graduated" : `Stage ${boxMon.stage}/${boxMon.totalStages}`}
+                          </span>
+                          {#if boxMon.nature}
+                            <span class="pc-nature-tag">{boxMon.nature}</span>
+                          {/if}
+                        {/if}
+                      </div>
+
+                      <div class="pc-sprite-container">
+                        {#if boxMon.isEgg}
+                          <div class="pc-egg-sprite">🥚</div>
+                        {:else}
+                          <img
+                            class="pc-sprite-img"
+                            src={spriteUrl(boxMon.speciesId, boxMon.isShiny, true)}
+                            alt={boxMon.displayName}
+                            onerror={(e) => fallbackStaticSprite(e, boxMon.speciesId, boxMon.isShiny)}
+                            loading="lazy"
+                          />
+                        {/if}
+                      </div>
+
+                      <div class="pc-mon-info">
+                        <span class="pc-mon-name">
+                          {boxMon.displayName}
+                          {#if boxMon.isShiny}<span class="shiny-star">✨</span>{/if}
+                        </span>
+                        {#if !boxMon.isEgg}
+                          <div class="pc-progress-track">
+                            <div class="pc-progress-fill" style="width: {Math.round(boxMon.progress * 100)}%;"></div>
+                          </div>
+                          <span class="pc-progress-text">{Math.round(boxMon.progress * 100)}% Growth</span>
+                        {:else}
+                          <div class="pc-progress-track">
+                            <div class="pc-progress-fill egg-fill" style="width: {Math.round(boxMon.eggProgress * 100)}%;"></div>
+                          </div>
+                          <span class="pc-progress-text">{boxMon.eggTier ? `${boxMon.eggTier.toUpperCase()} Guarantee` : "Incubating"}</span>
+                        {/if}
+                      </div>
+
+                      <button
+                        type="button"
+                        class="pc-switch-btn"
+                        disabled={isSwitchingBuddy}
+                        onclick={() => switchActiveBuddy(boxMon.id, "box")}
+                      >
+                        {#if boxMon.isEgg}
+                          <span>🥚 Resume Incubation</span>
+                        {:else}
+                          <span>🌟 Withdraw & Walk</span>
+                        {/if}
+                      </button>
+                    </div>
+                  {/each}
+                </div>
+              {:else}
+                <div class="empty-pc-box">
+                  <div class="empty-pc-icon">📦</div>
+                  <span class="empty-pc-title">Your PC Box is empty</span>
+                  <p class="empty-pc-desc">
+                    When you incubate a new egg or switch buddies, your current partner is safely stored here with their exact stage and level preserved!
+                  </p>
+                </div>
+              {/if}
+            {/if}
           </div>
         {/if}
 
@@ -2968,6 +3273,19 @@
                 </div>
               </div>
             {/if}
+
+            <!-- 🌟 Set as Active Buddy Button -->
+            <div class="dex-modal-action-row">
+              <button
+                type="button"
+                class="dex-set-active-btn"
+                disabled={isSwitchingBuddy}
+                onclick={() => switchActiveBuddy(String(selectedDexMon?.id), "dex")}
+              >
+                <span class="btn-icon">🌟</span>
+                <span>Set as Active Buddy Partner</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -4792,53 +5110,576 @@
     cursor: not-allowed;
   }
 
-  .bag-use-btn.berry-feed-btn {
-    background: rgba(59, 130, 246, 0.18);
-    border-color: rgba(59, 130, 246, 0.45);
-    color: #93C5FD;
+  /* Segmented Submode Toggle Bars (Shop & Pokédex) */
+  .shop-mode-toggle-bar,
+  .pokedex-mode-toggle-bar {
+    display: flex;
+    gap: 6px;
+    background: rgba(0, 0, 0, 0.28);
+    padding: 4px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    margin-bottom: 12px;
   }
 
-  .bag-use-btn.berry-feed-btn:hover:not(:disabled) {
-    background: rgba(59, 130, 246, 0.3);
-    border-color: rgba(59, 130, 246, 0.65);
-    box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
+  .shop-mode-btn,
+  .pokedex-mode-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px 12px;
+    border-radius: 9px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #8E92A4;
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.18s ease;
   }
 
-  .bag-held-badge {
-    font-size: 10.5px;
+  .shop-mode-btn:hover,
+  .pokedex-mode-btn:hover {
+    color: #F2F3F5;
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .shop-mode-btn.active,
+  .pokedex-mode-btn.active {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.18);
+    color: #FFFFFF;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  }
+
+  .bag-pill-count,
+  .pokedex-count-badge {
+    font-size: 9.5px;
     font-weight: 700;
-    padding: 3px 8px;
+    padding: 1px 6px;
     border-radius: 999px;
-    background: rgba(252, 211, 77, 0.14);
-    border: 1px solid rgba(252, 211, 77, 0.35);
-    color: #FCD34D;
+    background: rgba(232, 184, 75, 0.2);
+    border: 1px solid rgba(232, 184, 75, 0.45);
+    color: #E8B84B;
   }
 
-  .quick-btn .btn-emoji {
-    font-size: 15px;
-    line-height: 1;
+  /* 🎒 Full Trainer Bag Styles */
+  .bag-full-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
   }
 
-  .quick-btn.berry-btn {
-    background: rgba(59, 130, 246, 0.08);
-    border-color: rgba(59, 130, 246, 0.25);
+  .bag-header-full {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .bag-header-left {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .bag-header-sub {
+    font-size: 11px;
+    color: #8E92A4;
+  }
+
+  .visit-store-btn {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 5px 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(232, 184, 75, 0.35);
+    background: rgba(232, 184, 75, 0.12);
+    color: #E8B84B;
+    cursor: pointer;
+    transition: all 0.18s ease;
+  }
+
+  .visit-store-btn:hover {
+    background: rgba(232, 184, 75, 0.22);
+    border-color: rgba(232, 184, 75, 0.55);
+    box-shadow: 0 0 10px rgba(232, 184, 75, 0.25);
+  }
+
+  .bag-filter-bar {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .bag-filter-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10.5px;
+    font-weight: 600;
+    padding: 4px 9px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
+    color: #8E92A4;
+    cursor: pointer;
+    transition: all 0.18s ease;
+  }
+
+  .bag-filter-btn:hover {
+    color: #F2F3F5;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .bag-filter-btn.active {
+    background: rgba(91, 140, 255, 0.18);
+    border-color: rgba(91, 140, 255, 0.45);
     color: #93C5FD;
   }
 
-  .quick-btn.berry-btn:hover:not(:disabled) {
+  .bag-items-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 10px;
+  }
+
+  .bag-item-card {
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: all 0.2s ease;
+  }
+
+  .bag-item-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.14);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  }
+
+  .bic-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .bic-qty {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #FFFFFF;
+  }
+
+  .bic-info {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1;
+  }
+
+  .bic-name {
+    font-size: 12px;
+    font-weight: 700;
+    color: #F2F3F5;
+  }
+
+  .bic-desc {
+    font-size: 10.5px;
+    color: #8E92A4;
+    line-height: 1.35;
+  }
+
+  .bic-actions {
+    display: flex;
+  }
+
+  .bag-action-btn {
+    width: 100%;
+    padding: 6px 10px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.18s ease;
+  }
+
+  .bag-action-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .bag-action-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .bag-action-btn.feed-btn {
     background: rgba(59, 130, 246, 0.18);
     border-color: rgba(59, 130, 246, 0.45);
+    color: #93C5FD;
   }
 
-  .quick-btn.berry-btn.gold {
-    background: rgba(245, 158, 11, 0.08);
-    border-color: rgba(245, 158, 11, 0.25);
-    color: #FCD34D;
-  }
-
-  .quick-btn.berry-btn.gold:hover:not(:disabled) {
+  .bag-action-btn.feed-btn.gold {
     background: rgba(245, 158, 11, 0.18);
     border-color: rgba(245, 158, 11, 0.45);
+    color: #FCD34D;
+  }
+
+  .bag-action-btn.candy-btn {
+    background: rgba(255, 98, 89, 0.18);
+    border-color: rgba(255, 98, 89, 0.45);
+    color: #FFA59E;
+  }
+
+  .bag-action-btn.mint-btn {
+    background: rgba(57, 217, 138, 0.18);
+    border-color: rgba(57, 217, 138, 0.45);
+    color: #86EFAC;
+  }
+
+  .bag-action-btn.egg-btn {
+    background: linear-gradient(135deg, rgba(232, 184, 75, 0.25), rgba(245, 158, 11, 0.35));
+    border-color: rgba(232, 184, 75, 0.6);
+    color: #FFF2B2;
+    box-shadow: 0 0 10px rgba(232, 184, 75, 0.2);
+  }
+
+  .bag-action-btn.egg-btn:hover:not(:disabled) {
+    background: linear-gradient(135deg, rgba(232, 184, 75, 0.35), rgba(245, 158, 11, 0.5));
+    box-shadow: 0 0 16px rgba(232, 184, 75, 0.4);
+  }
+
+  .bic-active-pill {
+    font-size: 10.5px;
+    font-weight: 700;
+    padding: 5px 10px;
+    border-radius: 8px;
+    background: rgba(232, 184, 75, 0.14);
+    border: 1px solid rgba(232, 184, 75, 0.35);
+    color: #E8B84B;
+    text-align: center;
+    width: 100%;
+  }
+
+  .empty-bag-icon {
+    font-size: 32px;
+    margin-bottom: 4px;
+  }
+
+  .empty-visit-btn {
+    margin-top: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: rgba(232, 184, 75, 0.15);
+    border: 1px solid rgba(232, 184, 75, 0.4);
+    color: #E8B84B;
+    cursor: pointer;
+    transition: all 0.18s ease;
+  }
+
+  .empty-visit-btn:hover {
+    background: rgba(232, 184, 75, 0.25);
+    box-shadow: 0 0 10px rgba(232, 184, 75, 0.3);
+  }
+
+  .shop-item-name-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .shop-owned-tag {
+    font-size: 9.5px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: rgba(57, 217, 138, 0.14);
+    border: 1px solid rgba(57, 217, 138, 0.35);
+    color: #39D98A;
+  }
+
+  /* 📦 Bill's PC Box View */
+  .pc-box-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .pc-box-title-box {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .pc-box-sub {
+    font-size: 11px;
+    color: #8E92A4;
+  }
+
+  .deposit-active-btn {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 5px 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 98, 89, 0.35);
+    background: rgba(255, 98, 89, 0.12);
+    color: #FFA59E;
+    cursor: pointer;
+    transition: all 0.18s ease;
+  }
+
+  .deposit-active-btn:hover {
+    background: rgba(255, 98, 89, 0.22);
+    border-color: rgba(255, 98, 89, 0.55);
+    box-shadow: 0 0 10px rgba(255, 98, 89, 0.25);
+  }
+
+  .pc-box-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 10px;
+  }
+
+  .pc-box-card {
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    position: relative;
+    transition: all 0.2s ease;
+  }
+
+  .pc-box-card:hover {
+    background: rgba(255, 255, 255, 0.065);
+    border-color: rgba(255, 255, 255, 0.16);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  }
+
+  .pc-box-card.is-egg-card {
+    border-color: rgba(232, 184, 75, 0.25);
+    background: rgba(232, 184, 75, 0.03);
+  }
+
+  .pc-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .pc-type-tag {
+    font-size: 9.5px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: #E2E8F0;
+  }
+
+  .pc-type-tag.grad-tag {
+    background: rgba(232, 184, 75, 0.16);
+    border-color: rgba(232, 184, 75, 0.4);
+    color: #FCD34D;
+  }
+
+  .pc-type-tag.egg-tag {
+    background: rgba(245, 158, 11, 0.16);
+    border-color: rgba(245, 158, 11, 0.4);
+    color: #FBBF24;
+  }
+
+  .pc-stat-badge {
+    font-size: 10px;
+    font-weight: 700;
+    color: #E8B84B;
+  }
+
+  .pc-nature-tag {
+    font-size: 9.5px;
+    font-weight: 600;
+    color: #86EFAC;
+  }
+
+  .pc-sprite-container {
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .pc-sprite-img {
+    height: 58px;
+    width: auto;
+    object-fit: contain;
+    image-rendering: pixelated;
+    filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.4));
+  }
+
+  .pc-egg-sprite {
+    font-size: 38px;
+    line-height: 1;
+    filter: drop-shadow(0 0 10px rgba(232, 184, 75, 0.4));
+  }
+
+  .pc-mon-info {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .pc-mon-name {
+    font-size: 12px;
+    font-weight: 700;
+    color: #F2F3F5;
+  }
+
+  .pc-progress-track {
+    width: 100%;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+  }
+
+  .pc-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3B82F6, #60A5FA);
+    border-radius: 999px;
+  }
+
+  .pc-progress-fill.egg-fill {
+    background: linear-gradient(90deg, #E8B84B, #F59E0B);
+  }
+
+  .pc-progress-text {
+    font-size: 9.5px;
+    color: #8E92A4;
+  }
+
+  .pc-switch-btn {
+    width: 100%;
+    padding: 6px 10px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    border: 1px solid rgba(91, 140, 255, 0.45);
+    background: rgba(91, 140, 255, 0.16);
+    color: #93C5FD;
+    cursor: pointer;
+    transition: all 0.18s ease;
+  }
+
+  .pc-switch-btn:hover:not(:disabled) {
+    background: rgba(91, 140, 255, 0.28);
+    box-shadow: 0 0 10px rgba(91, 140, 255, 0.3);
+    transform: translateY(-1px);
+  }
+
+  .empty-pc-box {
+    padding: 36px 20px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px dashed rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 6px;
+  }
+
+  .empty-pc-icon {
+    font-size: 32px;
+    margin-bottom: 2px;
+  }
+
+  .empty-pc-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #F2F3F5;
+  }
+
+  .empty-pc-desc {
+    font-size: 11px;
+    color: #8E92A4;
+    max-width: 320px;
+    line-height: 1.4;
+    margin: 0;
+  }
+
+  /* Pokédex Modal Set Active Buddy Button */
+  .dex-modal-action-row {
+    margin-top: 14px;
+  }
+
+  .dex-set-active-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 700;
+    border: 1px solid rgba(232, 184, 75, 0.6);
+    background: linear-gradient(135deg, rgba(232, 184, 75, 0.25), rgba(245, 158, 11, 0.35));
+    color: #FFF5C2;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 0 14px rgba(232, 184, 75, 0.2);
+  }
+
+  .dex-set-active-btn:hover:not(:disabled) {
+    background: linear-gradient(135deg, rgba(232, 184, 75, 0.38), rgba(245, 158, 11, 0.5));
+    border-color: rgba(232, 184, 75, 0.85);
+    box-shadow: 0 0 20px rgba(232, 184, 75, 0.4);
+    transform: translateY(-1px);
+  }
+
+  .dex-set-active-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Quick Items Header Link on Buddy Tab */
+  .quick-items-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
+  .quick-open-bag-link {
+    font-size: 10.5px;
+    font-weight: 600;
+    color: #93C5FD;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    transition: color 0.15s ease;
+  }
+
+  .quick-open-bag-link:hover {
+    color: #BFDBFE;
+    text-decoration: underline;
   }
 
   /* Mega Overdrive & Gigantamax Surge */
